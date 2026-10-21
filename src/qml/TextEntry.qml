@@ -4,7 +4,8 @@ import Guckste
 
 // Where a Text annotation is typed: an editor at the clicked point, in the
 // font the annotation will be drawn with. Enter accepts, Shift+Enter breaks
-// the line, Escape drops it.
+// the line, Escape drops it. Accepting an empty text is left to whoever
+// listens: nothing for a new text, removing it for an edited one.
 Item {
     id: entry
 
@@ -36,10 +37,7 @@ Item {
         const text = area.text
         visible = false
         area.text = ""
-        if (text.trim() === "")
-            cancelled()
-        else
-            accepted(text)
+        accepted(text.trim() === "" ? "" : text)
     }
 
     function cancel() {

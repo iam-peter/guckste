@@ -50,6 +50,9 @@ Window {
     onPickModeChanged: if (started) Preferences.pickMode = pickMode
     // A region to start with, in screen coordinates: after a timer.
     property rect presetRegion: Qt.rect(0, 0, 0, 0)
+    // Opened from an editor to add a screenshot to its document: Enter
+    // adds the region there.
+    property Document addTarget: null
 
     x: screenGeometry.x
     y: screenGeometry.y
@@ -287,6 +290,10 @@ Window {
     }
 
     function edit() {
+        if (addTarget) {
+            addToEditor()
+            return
+        }
         if (!hasSelection)
             return
         textEntry.commit()
@@ -295,7 +302,7 @@ Window {
     }
 
     function record() {
-        if (!hasSelection)
+        if (!hasSelection || addTarget)
             return
         textEntry.commit()
         rememberTools()
@@ -305,8 +312,18 @@ Window {
                                    selection.width / imageScale, selection.height / imageScale))
     }
 
+    function addToEditor() {
+        if (!hasSelection || !addTarget)
+            return
+        textEntry.commit()
+        rememberTools()
+        App.addToDocument(addTarget, document, selection)
+    }
+
     function primaryAction() {
-        if (recordMode)
+        if (addTarget)
+            addToEditor()
+        else if (recordMode)
             record()
         else
             copy()
@@ -754,7 +771,7 @@ Window {
 
         IconButton {
             iconName: "copy"
-            tip: qsTr("Copy to clipboard (Enter)")
+            tip: root.addTarget !== null ? qsTr("Copy to clipboard") : qsTr("Copy to clipboard (Enter)")
             onClicked: root.copy()
         }
         IconButton {
@@ -763,11 +780,19 @@ Window {
             onClicked: root.save()
         }
         IconButton {
+            visible: root.addTarget !== null
+            iconName: "image-plus"
+            tip: qsTr("Add to the editor (Enter)")
+            onClicked: root.addToEditor()
+        }
+        IconButton {
+            visible: root.addTarget === null
             iconName: "pencil-ruler"
             tip: qsTr("Open in the editor to zoom and measure (E)")
             onClicked: root.edit()
         }
         IconButton {
+            visible: root.addTarget === null
             iconName: "video"
             tip: root.recordMode ? qsTr("Record this region (Enter)") : qsTr("Record this region (Shift+Enter)")
             checked: root.recordMode
@@ -775,6 +800,7 @@ Window {
         }
         IconButton {
             id: timerButton
+            visible: root.addTarget === null
             iconName: "timer"
             tip: qsTr("Capture this region again after a delay, for menus and tooltips")
             onClicked: timerMenu.open()

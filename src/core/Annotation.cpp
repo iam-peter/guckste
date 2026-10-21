@@ -53,8 +53,21 @@ bool Annotation::isEmpty() const
     case Type::Marker:
     case Type::Pixelate:
         return points.size() < 2 || rect().width() < 1 || rect().height() < 1;
+    case Type::Image:
+        return image.isNull() || points.size() < 2 || rect().width() < 1 || rect().height() < 1;
     }
     return true;
+}
+
+bool Annotation::hasEndPoints() const
+{
+    return type == Type::Line || type == Type::Arrow || type == Type::Measure;
+}
+
+bool Annotation::hasBox() const
+{
+    return type == Type::Rectangle || type == Type::Ellipse || type == Type::Marker || type == Type::Pixelate
+        || type == Type::Image;
 }
 
 bool Annotation::isAxisAligned(const QPointF &a, const QPointF &b)

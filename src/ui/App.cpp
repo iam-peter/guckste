@@ -201,7 +201,7 @@ static void holdKeyboard(QQuickWindow *window)
     retry->start();
 }
 
-void App::openOverlay(bool recordMode, const QRect &presetRegion)
+void App::openOverlay(bool recordMode, const QRect &presetRegion, int minimumWait)
 {
     if (m_overlay) {
         m_overlay->setProperty("recordMode", recordMode);
@@ -214,6 +214,7 @@ void App::openOverlay(bool recordMode, const QRect &presetRegion)
     int wait = 0;
     if (m_trayMenuClosed.isValid() && m_trayMenuClosed.elapsed() < menuFadeMs)
         wait = menuFadeMs - int(m_trayMenuClosed.elapsed());
+    wait = qMax(wait, minimumWait);
     QTimer::singleShot(wait, this, [this, recordMode, presetRegion] {
         ScreenCapture::grab(this, Preferences::instance()->includeCursor(), [this, recordMode, presetRegion](const Capture &capture) {
             if (!capture.ok) {
@@ -236,7 +237,8 @@ void App::openOverlay(bool recordMode, const QRect &presetRegion)
                                                   {QStringLiteral("recordMode"), recordMode},
                                                   {QStringLiteral("windowRects"), windows},
                                                   {QStringLiteral("pointerScreen"), pointerScreen},
-                                                  {QStringLiteral("presetRegion"), QRectF(presetRegion)}});
+                                                  {QStringLiteral("presetRegion"), QRectF(presetRegion)},
+                                                  {QStringLiteral("addTarget"), QVariant::fromValue(m_addTarget.data())}});
             if (!overlay) {
                 delete document;
                 return;
@@ -244,6 +246,16 @@ void App::openOverlay(bool recordMode, const QRect &presetRegion)
             document->setParent(overlay);
             m_overlay = overlay;
             connect(overlay, &QObject::destroyed, this, &App::capturingChanged);
+            // The editor the capture was for comes back, added to or not.
+            connect(overlay, &QObject::destroyed, this, [this] {
+                if (QQuickWindow *editor = m_addEditor) {
+                    editor->showNormal();
+                    editor->raise();
+                    editor->requestActivate();
+                }
+                m_addEditor = nullptr;
+                m_addTarget = nullptr;
+            });
             emit capturingChanged();
             overlay->show();
             overlay->raise();
@@ -357,6 +369,29 @@ void App::editInWindow(Document *document, const QRectF &region)
     // Out of the overlay, which is about to close and would delete it.
     document->setParent(nullptr);
     showEditor(document);
+    closeOverlay();
+}
+
+void App::addScreenshotTo(QQuickWindow *editor, Document *document)
+{
+    if (!editor || !document || m_overlay)
+        return;
+    m_addEditor = editor;
+    m_addTarget = document;
+    editor->showMinimized();
+    // Long enough for the window manager to take the editor off screen.
+    openOverlay(false, QRect(), 300);
+}
+
+void App::addToDocument(Document *target, Document *source, const QRectF &region)
+{
+    if (target && source) {
+        const QImage image = source->render(1, region.toAlignedRect());
+        if (target->addImage(image) >= 0 && m_addEditor) {
+            m_addEditor->setProperty("tool", int(Document::Select));
+            QMetaObject::invokeMethod(m_addEditor, "fitIfNeeded");
+        }
+    }
     closeOverlay();
 }
 

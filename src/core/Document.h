@@ -5,8 +5,10 @@
 #include <QColor>
 #include <QImage>
 #include <QObject>
+#include <QRect>
 #include <QRectF>
 #include <QUrl>
+#include <QVariantList>
 #include <QtQml/qqmlregistration.h>
 
 #include <optional>
@@ -14,6 +16,10 @@
 // A screenshot and the annotations on it, with undo. QML draws by calling
 // begin/update/commitAnnotation as the pointer moves; the image is shown
 // through the "guckste" image provider at `imageSource`.
+//
+// Further images can be added as Image annotations, to combine screenshots:
+// the screenshot stays at the origin as the bottom layer, and the canvas,
+// what is exported, grows to take in every image wherever it is placed.
 class Document : public QObject
 {
     Q_OBJECT
@@ -28,10 +34,18 @@ class Document : public QObject
     Q_PROPERTY(int selectedIndex READ selectedIndex WRITE setSelectedIndex NOTIFY selectedIndexChanged)
     Q_PROPERTY(QString filePath READ filePath NOTIFY filePathChanged)
     Q_PROPERTY(bool modified READ modified NOTIFY modifiedChanged)
+    // The canvas in image pixels: the screenshot and every added image.
+    Q_PROPERTY(int canvasX READ canvasX NOTIFY canvasChanged)
+    Q_PROPERTY(int canvasY READ canvasY NOTIFY canvasChanged)
+    Q_PROPERTY(int canvasWidth READ canvasWidth NOTIFY canvasChanged)
+    Q_PROPERTY(int canvasHeight READ canvasHeight NOTIFY canvasChanged)
+    // Goes up with every change, for bindings that ask for derived data.
+    Q_PROPERTY(int revision READ revision NOTIFY changed)
 
 public:
     // Mirrors Annotation::Type, with Select in front, for QML.
-    enum Tool { Select, Pen, Line, Arrow, Rectangle, Ellipse, Marker, Text, Pixelate, Counter, Measure };
+    // Image is no tool to draw with, only the kind of an added image.
+    enum Tool { Select, Pen, Line, Arrow, Rectangle, Ellipse, Marker, Text, Pixelate, Counter, Measure, Image };
     Q_ENUM(Tool)
 
     explicit Document(QObject *parent = nullptr);
@@ -48,6 +62,12 @@ public:
     Q_INVOKABLE bool load(const QString &path);
     QString filePath() const { return m_filePath; }
     bool modified() const { return m_modified; }
+    QRect canvas() const { return m_canvas; }
+    int canvasX() const { return m_canvas.x(); }
+    int canvasY() const { return m_canvas.y(); }
+    int canvasWidth() const { return m_canvas.width(); }
+    int canvasHeight() const { return m_canvas.height(); }
+    int revision() const { return m_revision; }
 
     const QList<Annotation> &annotations() const { return m_annotations; }
     const Annotation *current() const { return m_current ? &*m_current : nullptr; }
@@ -73,6 +93,31 @@ public:
     Q_INVOKABLE qreal annotationSize(int index) const;
     Q_INVOKABLE QColor annotationColor(int index) const;
     Q_INVOKABLE int nextNumber() const;
+    // Restyling a mark: a run of changes to one mark, like dragging the
+    // size slider, is one undo step.
+    Q_INVOKABLE void setAnnotationColor(int index, const QColor &color);
+    Q_INVOKABLE void setAnnotationSize(int index, qreal size);
+    // Layer order: index 0 is drawn first, right above the screenshot.
+    Q_INVOKABLE void moveLayer(int from, int to);
+
+    // Adding images, placed right of the canvas; returns their index.
+    int addImage(const QImage &image);
+    Q_INVOKABLE int addImage(const QImage &image, qreal x, qreal y);
+    Q_INVOKABLE int addImageFile(const QString &path);
+    Q_INVOKABLE int pasteImage();
+    Q_INVOKABLE bool clipboardHasImage() const;
+
+    // The points a selected mark is reshaped by, in image pixels: a line's
+    // two ends, or a box's corners and edge middles clockwise from its
+    // top-left. Empty for marks that only move.
+    Q_INVOKABLE QVariantList handlePoints(int index) const;
+    // Reshaping: one undo step from beginHandleDrag() to endHandleDrag().
+    // Shift squares a box or snaps a line to 45°; an image keeps its
+    // aspect ratio unless Shift is held; a Measure mark stays on its axis
+    // unless Alt is held.
+    Q_INVOKABLE void beginHandleDrag(int index);
+    Q_INVOKABLE void dragHandle(int handle, qreal x, qreal y, int modifiers);
+    Q_INVOKABLE void endHandleDrag();
 
     // The topmost annotation at an image point, -1 for none. `scale` says
     // how big strokes and labels are on screen, in image pixels.
@@ -88,8 +133,16 @@ public:
     Q_INVOKABLE void clearAnnotations();
 
     // The image with its annotations at `scale`, pixels enlarged without
-    // smoothing; `region` (image pixels) crops it, empty for all of it.
+    // smoothing; `region` (image pixels) crops it, empty for the canvas.
     QImage render(qreal scale, const QRect &region = QRect()) const;
+    // Paints the layers below `upTo` (all of them for -1) mapped by
+    // (p - origin) * scale, without the screenshot unless `withBase`, and
+    // leaving out `hidden`, like a text being edited. The mark being drawn
+    // goes on top when `withCurrent`.
+    void paintLayers(QPainter &painter, qreal scale, const QPointF &origin, int upTo = -1, bool withBase = true,
+                     int hidden = -1, bool withCurrent = false) const;
+    // Everything below layer `upTo` within `rect`, at 1:1.
+    QImage backdrop(int upTo, const QRect &rect) const;
     Q_INVOKABLE void copyToClipboard(qreal scale, const QRectF &region = QRectF());
     Q_INVOKABLE bool save(const QString &path, qreal scale, const QRectF &region = QRectF());
     // Keeps the region only, annotations moved along.
@@ -99,6 +152,7 @@ public:
 signals:
     void imageChanged();
     void changed();
+    void canvasChanged();
     void selectedIndexChanged();
     void filePathChanged();
     void modifiedChanged();
@@ -106,6 +160,8 @@ signals:
 private:
     void pushUndo();
     void setModified(bool modified);
+    void updateCanvas();
+    void snapImage(int index);
 
     static int s_nextId;
     int m_id;
@@ -119,4 +175,10 @@ private:
     QList<QList<Annotation>> m_redo;
     int m_selected = -1;
     int m_moving = -1;
+    int m_editing = -1;
+    Annotation m_editStart;
+    // The mark a run of restyling changes goes to, -1 for none.
+    int m_restyling = -1;
+    QRect m_canvas;
+    int m_revision = 0;
 };

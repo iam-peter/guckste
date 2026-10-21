@@ -8,6 +8,7 @@ qt_add_qml_module(guckste_core
         core/Annotation.h core/Annotation.cpp
         core/AnnotationPainter.h core/AnnotationPainter.cpp
         core/Document.h core/Document.cpp
+        core/LayerModel.h core/LayerModel.cpp
         core/FileNaming.h core/FileNaming.cpp
         core/ScreenCapture.h core/ScreenCapture.cpp
         core/SingleInstance.h core/SingleInstance.cpp
@@ -93,6 +94,7 @@ qt_add_qml_module(guckste_qml
         qml/Countdown.qml
         qml/VideoEditorWindow.qml
         qml/DrawingArea.qml
+        qml/LayerPanel.qml
         qml/Timeline.qml
         qml/AnnotationToolbar.qml
         qml/TextEntry.qml
@@ -101,6 +103,14 @@ qt_add_qml_module(guckste_qml
         qml/IconButton.qml
         qml/Theme.qml
     RESOURCES
+        icons/image-plus.svg
+        icons/layers.svg
+        icons/image.svg
+        icons/chevron-up.svg
+        icons/chevron-down.svg
+        icons/trash-2.svg
+        icons/lock.svg
+        icons/clipboard-paste.svg
         icons/circle.svg
         icons/circle-stop.svg
         icons/copy.svg

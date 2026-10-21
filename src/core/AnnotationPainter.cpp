@@ -120,6 +120,9 @@ void AnnotationPainter::paint(const Annotation &a)
     case Annotation::Type::Measure:
         paintMeasure(a);
         break;
+    case Annotation::Type::Image:
+        paintImage(a);
+        break;
     }
     m_painter.restore();
 }
@@ -160,16 +163,29 @@ void AnnotationPainter::paintText(const Annotation &a)
 
 void AnnotationPainter::paintPixelate(const Annotation &a)
 {
-    const QRect source = a.rect().toAlignedRect() & m_base.rect();
+    const QRect source = m_backdrop ? a.rect().toAlignedRect() : a.rect().toAlignedRect() & m_base.rect();
     if (source.isEmpty())
         return;
     const int block = pixelateBlock(a.size);
-    const QImage region = m_base.copy(source);
+    const QImage region = m_backdrop ? m_backdrop(source) : m_base.copy(source);
     const QImage coarse = region.scaled(qMax(1, (source.width() + block - 1) / block),
                                         qMax(1, (source.height() + block - 1) / block),
                                         Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
     m_painter.setRenderHint(QPainter::SmoothPixmapTransform, false);
     m_painter.drawImage(map(QRectF(source)), coarse);
+}
+
+void AnnotationPainter::paintImage(const Annotation &a)
+{
+    if (a.image.isNull())
+        return;
+    const QRectF rect = a.rect();
+    // Enlarged with the view, pixels stay blocks like the screenshot's;
+    // an image resized by hand or shrunk is smoothed.
+    const bool resized = std::abs(rect.width() - a.image.width()) > 0.5 || std::abs(rect.height() - a.image.height()) > 0.5;
+    m_painter.setRenderHint(QPainter::Antialiasing, false);
+    m_painter.setRenderHint(QPainter::SmoothPixmapTransform, resized || m_scale < 1);
+    m_painter.drawImage(map(rect), a.image);
 }
 
 void AnnotationPainter::paintCounter(const Annotation &a)
@@ -274,6 +290,8 @@ QRectF AnnotationPainter::bounds(const Annotation &a) const
         painted |= labelRect(a);
         break;
     }
+    case Annotation::Type::Image:
+        return a.rect();
     case Annotation::Type::Arrow: {
         painted = map(a.geometryBounds());
         const qreal head = 6 + a.size * 2.5;

@@ -20,6 +20,8 @@ class AnnotationLayer : public QQuickPaintedItem
     Q_PROPERTY(bool showGrid READ showGrid WRITE setShowGrid NOTIFY showGridChanged)
     Q_PROPERTY(qreal gridMinZoom READ gridMinZoom WRITE setGridMinZoom NOTIFY showGridChanged)
     Q_PROPERTY(bool showSelection READ showSelection WRITE setShowSelection NOTIFY showSelectionChanged)
+    // A mark left out, like a text while it is edited in place.
+    Q_PROPERTY(int hiddenIndex READ hiddenIndex WRITE setHiddenIndex NOTIFY hiddenIndexChanged)
 
 public:
     explicit AnnotationLayer(QQuickItem *parent = nullptr);
@@ -38,6 +40,8 @@ public:
     void setGridMinZoom(qreal zoom);
     bool showSelection() const { return m_showSelection; }
     void setShowSelection(bool on);
+    int hiddenIndex() const { return m_hiddenIndex; }
+    void setHiddenIndex(int index);
 
     // Between view and image coordinates.
     Q_INVOKABLE QPointF toImage(qreal x, qreal y) const;
@@ -51,6 +55,7 @@ signals:
     void originChanged();
     void showGridChanged();
     void showSelectionChanged();
+    void hiddenIndexChanged();
 
 private:
     Document *m_document = nullptr;
@@ -59,4 +64,5 @@ private:
     bool m_showGrid = false;
     qreal m_gridMinZoom = 8;
     bool m_showSelection = true;
+    int m_hiddenIndex = -1;
 };

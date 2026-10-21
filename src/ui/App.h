@@ -12,7 +12,7 @@
 #include <memory>
 
 class Document;
-class QQuickWindow;
+#include <QQuickWindow>
 class QSystemTrayIcon;
 class QMenu;
 class QAction;
@@ -73,6 +73,11 @@ public:
     Q_INVOKABLE bool openEditor(const QString &path);
     // Hands the overlay's document, cropped to the region, to a new editor.
     Q_INVOKABLE void editInWindow(Document *document, const QRectF &region);
+    // Captures a region to add to an editor's document: the editor gets
+    // out of the way while the overlay is up.
+    Q_INVOKABLE void addScreenshotTo(QQuickWindow *editor, Document *document);
+    // From the overlay: its region goes into `target` as an image.
+    Q_INVOKABLE void addToDocument(Document *target, Document *source, const QRectF &region);
     Q_INVOKABLE void openSettings();
     Q_INVOKABLE void closeOverlay();
     Q_INVOKABLE void notify(const QString &title, const QString &text);
@@ -87,7 +92,7 @@ private slots:
 private:
     QQuickWindow *createWindow(const QString &type, const QVariantMap &properties);
     void showEditor(Document *document);
-    void openOverlay(bool recordMode, const QRect &presetRegion = QRect());
+    void openOverlay(bool recordMode, const QRect &presetRegion = QRect(), int minimumWait = 0);
     void updateTrayForRecording();
 
     QQmlEngine *m_engine;
@@ -101,6 +106,9 @@ private:
     QPointer<QQuickWindow> m_countdown;
     bool m_countdownRecordMode = false;
     QPointer<QQuickWindow> m_overlay;
+    // The editor a capture is for, and its document.
+    QPointer<QQuickWindow> m_addEditor;
+    QPointer<Document> m_addTarget;
     QPointer<QQuickWindow> m_settings;
     QList<QPointer<QQuickWindow>> m_editors;
 };

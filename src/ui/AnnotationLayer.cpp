@@ -96,39 +96,52 @@ QPointF AnnotationLayer::toView(qreal x, qreal y) const
     return QPointF((x - m_origin.x()) * m_zoom, (y - m_origin.y()) * m_zoom);
 }
 
+void AnnotationLayer::setHiddenIndex(int index)
+{
+    if (m_hiddenIndex == index)
+        return;
+    m_hiddenIndex = index;
+    emit hiddenIndexChanged();
+    update();
+}
+
 void AnnotationLayer::paint(QPainter *painter)
 {
     if (!m_document)
         return;
-    const QImage &base = m_document->image();
+    const QRect canvas = m_document->canvas();
 
-    if (m_showGrid && m_zoom >= m_gridMinZoom && !base.isNull()) {
-        // A line on every pixel edge of the image that is in view.
+    if (m_showGrid && m_zoom >= m_gridMinZoom && !canvas.isEmpty()) {
+        // A line on every pixel edge of the canvas that is in view.
         painter->save();
         painter->setRenderHint(QPainter::Antialiasing, false);
         painter->setPen(QPen(QColor(128, 128, 128, 140), 1));
-        const qreal firstX = std::max<qreal>(0, std::ceil(m_origin.x()));
-        const qreal lastX = std::min<qreal>(base.width(), m_origin.x() + width() / m_zoom);
+        const qreal top = std::max<qreal>(0, (canvas.top() - m_origin.y()) * m_zoom);
+        const qreal bottom = std::min<qreal>(height(), (canvas.bottom() + 1 - m_origin.y()) * m_zoom);
+        const qreal left = std::max<qreal>(0, (canvas.left() - m_origin.x()) * m_zoom);
+        const qreal right = std::min<qreal>(width(), (canvas.right() + 1 - m_origin.x()) * m_zoom);
+        const qreal firstX = std::max<qreal>(canvas.left(), std::ceil(m_origin.x()));
+        const qreal lastX = std::min<qreal>(canvas.right() + 1, m_origin.x() + width() / m_zoom);
         for (qreal ix = firstX; ix <= lastX; ix += 1) {
             const int x = qRound((ix - m_origin.x()) * m_zoom);
-            painter->drawLine(x, 0, x, qRound(height()));
+            painter->drawLine(QPointF(x, top), QPointF(x, bottom));
         }
-        const qreal firstY = std::max<qreal>(0, std::ceil(m_origin.y()));
-        const qreal lastY = std::min<qreal>(base.height(), m_origin.y() + height() / m_zoom);
+        const qreal firstY = std::max<qreal>(canvas.top(), std::ceil(m_origin.y()));
+        const qreal lastY = std::min<qreal>(canvas.bottom() + 1, m_origin.y() + height() / m_zoom);
         for (qreal iy = firstY; iy <= lastY; iy += 1) {
             const int y = qRound((iy - m_origin.y()) * m_zoom);
-            painter->drawLine(0, y, qRound(width()), y);
+            painter->drawLine(QPointF(left, y), QPointF(right, y));
         }
         painter->restore();
     }
 
-    AnnotationPainter annotations(*painter, base, m_zoom, m_origin);
+    // The screenshot itself is the Image item below; this draws what is
+    // on it, added images included.
+    m_document->paintLayers(*painter, m_zoom, m_origin, -1, false, m_hiddenIndex, true);
     const QList<Annotation> &list = m_document->annotations();
-    for (const Annotation &a : list)
-        annotations.paint(a);
-    if (const Annotation *current = m_document->current())
-        annotations.paint(*current);
     const int selected = m_document->selectedIndex();
-    if (m_showSelection && selected >= 0 && selected < list.size())
-        annotations.paintSelection(list[selected]);
+    if (m_showSelection && selected >= 0 && selected < list.size() && selected != m_hiddenIndex) {
+        AnnotationPainter frame(*painter, m_document->image(), m_zoom, m_origin);
+        frame.paintSelection(list[selected]);
+    }
 }

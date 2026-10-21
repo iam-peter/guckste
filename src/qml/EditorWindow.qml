@@ -8,9 +8,10 @@ import Guckste
 import Guckste.Core
 import Guckste.Ui
 
-// A screenshot at any zoom, to draw on and measure. What is copied or saved
-// is what is seen: the image enlarged pixel for pixel, with the marks on
-// top at their on-screen size.
+// A screenshot at any zoom, to draw on and measure, and to combine with
+// further screenshots and images. What is copied or saved is what is seen:
+// the canvas enlarged pixel for pixel, with the marks on top at their
+// on-screen size. The layer panel lists every mark and image.
 ApplicationWindow {
     id: root
 
@@ -27,11 +28,17 @@ ApplicationWindow {
     readonly property real exportScale: exportAtZoom ? zoom : 1
     property point cursor: Qt.point(-1, -1)
     property bool discardConfirmed: false
+    property bool showLayers: true
+    // The canvas as last laid out, to keep the view still when it grows.
+    property rect shownCanvas: Qt.rect(document.canvasX, document.canvasY, document.canvasWidth, document.canvasHeight)
 
     readonly property string fileName: document.filePath !== "" ? document.filePath.split("/").pop() : qsTr("Screenshot")
 
-    width: Math.max(760, Math.min(document.imageWidth + 60, Screen.desktopAvailableWidth * 0.9))
-    height: Math.max(520, Math.min(document.imageHeight + 140, Screen.desktopAvailableHeight * 0.9))
+    // Room for the toolbar and the canvas to start with; then the window
+    // keeps its size while images come and go.
+    width: Math.min(Screen.desktopAvailableWidth * 0.9,
+                    Math.max(760, toolbar.implicitWidth, document.canvasWidth + 60 + (showLayers ? layers.width : 0)))
+    height: Math.max(520, Math.min(document.canvasHeight + 140, Screen.desktopAvailableHeight * 0.9))
     title: `${fileName}${document.modified ? " •" : ""} — Guckste`
     color: Qt.darker(palette.window, 1.25)
 
@@ -44,12 +51,12 @@ ApplicationWindow {
         newZoom = clamp(newZoom, 0.1, 64)
         const p = marks.toImage(viewX, viewY)
         zoom = newZoom
-        const contentWidth = Math.max(flick.width, document.imageWidth * zoom)
-        const contentHeight = Math.max(flick.height, document.imageHeight * zoom)
-        const imageX = (contentWidth - document.imageWidth * zoom) / 2
-        const imageY = (contentHeight - document.imageHeight * zoom) / 2
-        flick.contentX = clamp(p.x * zoom + imageX - viewX, 0, contentWidth - flick.width)
-        flick.contentY = clamp(p.y * zoom + imageY - viewY, 0, contentHeight - flick.height)
+        const contentWidth = Math.max(flick.width, document.canvasWidth * zoom)
+        const contentHeight = Math.max(flick.height, document.canvasHeight * zoom)
+        const canvasX = (contentWidth - document.canvasWidth * zoom) / 2
+        const canvasY = (contentHeight - document.canvasHeight * zoom) / 2
+        flick.contentX = clamp((p.x - document.canvasX) * zoom + canvasX - viewX, 0, contentWidth - flick.width)
+        flick.contentY = clamp((p.y - document.canvasY) * zoom + canvasY - viewY, 0, contentHeight - flick.height)
     }
 
     function zoomStep(direction: int) {
@@ -64,10 +71,50 @@ ApplicationWindow {
     }
 
     function zoomToFit() {
-        if (document.imageWidth === 0 || document.imageHeight === 0)
+        if (document.canvasWidth === 0 || document.canvasHeight === 0)
             return
-        const fit = Math.min((flick.width - 24) / document.imageWidth, (flick.height - 24) / document.imageHeight)
-        zoomAt(Math.min(fit, 1), flick.width / 2, flick.height / 2)
+        const fit = Math.min((flick.width - 24) / document.canvasWidth, (flick.height - 24) / document.canvasHeight)
+        zoom = clamp(Math.min(fit, 1), 0.1, 64)
+        flick.contentX = 0
+        flick.contentY = 0
+    }
+
+    // The canvas grew or shrank on its top or left: shift the view along,
+    // so what is on screen stays where it is.
+    function followCanvas() {
+        const now = Qt.rect(document.canvasX, document.canvasY, document.canvasWidth, document.canvasHeight)
+        const dx = (shownCanvas.x - now.x) * zoom
+        const dy = (shownCanvas.y - now.y) * zoom
+        shownCanvas = now
+        Qt.callLater(() => {
+            flick.contentX = clamp(flick.contentX + dx, 0, Math.max(0, flick.contentWidth - flick.width))
+            flick.contentY = clamp(flick.contentY + dy, 0, Math.max(0, flick.contentHeight - flick.height))
+        })
+    }
+
+    // The selected mark, if any, takes what the toolbar sets.
+    function restyleSelected(): int {
+        if (marks.editingIndex >= 0)
+            return marks.editingIndex
+        if (tool !== Document.Select)
+            return -1
+        const index = document.selectedIndex
+        return index >= 0 && document.annotationTool(index) !== Document.Image ? index : -1
+    }
+
+    function addFromClipboard() {
+        if (document.pasteImage() < 0) {
+            status.flash(qsTr("No image on the clipboard"))
+        } else {
+            pickTool(Document.Select)
+            fitIfNeeded()
+        }
+    }
+
+    function pickTool(picked: int) {
+        tool = picked
+        if (picked !== Document.Select)
+            document.selectedIndex = -1
     }
 
     function rememberTools() {
@@ -99,7 +146,7 @@ ApplicationWindow {
 
     function toolHint(): string {
         switch (tool) {
-        case Document.Select: return qsTr("Click a mark to select it, drag to move it, Delete removes it. Middle button or Space drags the view, Ctrl+wheel zooms.")
+        case Document.Select: return qsTr("Click a mark or image to select it, drag it or its handles, double-click a text to edit it. Delete removes it. Space drags the view, Ctrl+wheel zooms.")
         case Document.Measure: return qsTr("Drag along a row or column of pixels; the mark shows their count. Alt measures at any angle.")
         case Document.Text: return qsTr("Click where the text starts. Enter finishes, Shift+Enter breaks the line.")
         case Document.Line:
@@ -120,8 +167,30 @@ ApplicationWindow {
     }
 
     Component.onCompleted: {
-        if (document.imageWidth * zoom > flick.width || document.imageHeight * zoom > flick.height)
-            zoomToFit()
+        width = width
+        height = height
+        fitIfNeeded()
+    }
+
+    // After an image was added: all of the canvas in view, if it was not.
+    function fitIfNeeded() {
+        Qt.callLater(() => {
+            if (document.canvasWidth * zoom > flick.width || document.canvasHeight * zoom > flick.height)
+                zoomToFit()
+        })
+    }
+
+    Connections {
+        target: root.document
+        function onCanvasChanged() { root.followCanvas() }
+        // Selecting a mark shows its color and size in the toolbar.
+        function onSelectedIndexChanged() {
+            const index = root.document.selectedIndex
+            if (index < 0 || root.document.annotationTool(index) === Document.Image)
+                return
+            root.toolColor = root.document.annotationColor(index)
+            root.size = root.document.annotationSize(index)
+        }
     }
 
     header: AnnotationToolbar {
@@ -130,10 +199,50 @@ ApplicationWindow {
         color: root.toolColor
         size: root.size
         document: root.document
-        onToolPicked: tool => root.tool = tool
-        onColorPicked: picked => root.toolColor = picked
-        onSizePicked: size => root.size = size
+        onToolPicked: tool => root.pickTool(tool)
+        onColorPicked: picked => {
+            root.toolColor = picked
+            const index = root.restyleSelected()
+            if (index >= 0)
+                root.document.setAnnotationColor(index, picked)
+        }
+        onSizePicked: size => {
+            root.size = size
+            const index = root.restyleSelected()
+            if (index >= 0)
+                root.document.setAnnotationSize(index, size)
+        }
 
+        IconButton {
+            id: addButton
+            iconName: "image-plus"
+            tip: qsTr("Add a screenshot or image")
+            onClicked: addMenu.open()
+            Menu {
+                id: addMenu
+                y: addButton.height
+                MenuItem {
+                    text: qsTr("Capture a region…")
+                    onTriggered: App.addScreenshotTo(root, root.document)
+                }
+                MenuItem {
+                    text: qsTr("Image file…")
+                    onTriggered: addDialog.open()
+                }
+                MenuItem {
+                    text: qsTr("Paste (Ctrl+V)")
+                    onTriggered: root.addFromClipboard()
+                }
+            }
+        }
+        IconButton {
+            iconName: "layers"
+            tip: qsTr("Layers")
+            checkable: true
+            checked: root.showLayers
+            onClicked: root.showLayers = checked
+        }
+        ToolSeparator {}
         IconButton { iconName: "zoom-out"; tip: qsTr("Zoom out (Ctrl+-)"); onClicked: root.zoomStep(-1) }
         ToolButton {
             text: `${Math.round(root.zoom * 100)} %`
@@ -181,39 +290,97 @@ ApplicationWindow {
         IconButton { iconName: "settings"; tip: qsTr("Settings"); onClicked: App.openSettings() }
     }
 
+    LayerPanel {
+        id: layers
+        anchors.right: parent.right
+        anchors.top: parent.top
+        anchors.bottom: parent.bottom
+        width: 240
+        visible: root.showLayers
+        document: root.document
+        onPicked: root.tool = Document.Select
+        onEditRequested: index => {
+            root.tool = Document.Select
+            marks.editText(index)
+        }
+    }
+
     Flickable {
         id: flick
-        anchors.fill: parent
-        contentWidth: Math.max(width, root.document.imageWidth * root.zoom)
-        contentHeight: Math.max(height, root.document.imageHeight * root.zoom)
+        anchors.left: parent.left
+        anchors.top: parent.top
+        anchors.bottom: parent.bottom
+        anchors.right: root.showLayers ? layers.left : parent.right
+        contentWidth: Math.max(width, root.document.canvasWidth * root.zoom)
+        contentHeight: Math.max(height, root.document.canvasHeight * root.zoom)
         clip: true
         boundsBehavior: Flickable.StopAtBounds
         interactive: false
         ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
         ScrollBar.horizontal: ScrollBar { policy: ScrollBar.AsNeeded }
 
-        Image {
-            id: image
+        // The canvas: a checkerboard where nothing covers it, which stays
+        // transparent in what is exported.
+        Item {
+            id: canvasView
             x: (flick.contentWidth - width) / 2
             y: (flick.contentHeight - height) / 2
-            width: root.document.imageWidth * root.zoom
-            height: root.document.imageHeight * root.zoom
-            source: root.document.imageSource
-            cache: false
-            // Enlarged pixels stay blocks; shrinking averages them.
-            smooth: root.zoom < 1
-            mipmap: root.zoom < 1
-            fillMode: Image.Stretch
+            width: root.document.canvasWidth * root.zoom
+            height: root.document.canvasHeight * root.zoom
+
+            Image {
+                anchors.fill: parent
+                fillMode: Image.Tile
+                source: "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='16' height='16'>"
+                        + "<rect width='16' height='16' fill='%23ffffff'/><rect width='8' height='8' fill='%23d8d8d8'/>"
+                        + "<rect x='8' y='8' width='8' height='8' fill='%23d8d8d8'/></svg>"
+            }
+
+            Image {
+                id: image
+                x: -root.document.canvasX * root.zoom
+                y: -root.document.canvasY * root.zoom
+                width: root.document.imageWidth * root.zoom
+                height: root.document.imageHeight * root.zoom
+                source: root.document.imageSource
+                cache: false
+                // Enlarged pixels stay blocks; shrinking averages them.
+                smooth: root.zoom < 1
+                mipmap: root.zoom < 1
+                fillMode: Image.Stretch
+            }
+        }
+    }
+
+    // Images dropped on the window are added.
+    DropArea {
+        anchors.fill: flick
+        keys: ["text/uri-list"]
+        onDropped: drop => {
+            let added = 0
+            for (const url of drop.urls) {
+                const path = url.toString().replace(/^file:\/\//, "")
+                if (root.document.addImageFile(decodeURIComponent(path)) >= 0)
+                    ++added
+            }
+            if (added > 0) {
+                root.pickTool(Document.Select)
+                root.fitIfNeeded()
+                drop.acceptProposedAction()
+            } else {
+                status.flash(qsTr("Nothing there could be read as an image"))
+            }
         }
     }
 
     DrawingArea {
         id: marks
+        objectName: "drawingArea"
         anchors.fill: flick
         document: root.document
         zoom: root.zoom
-        originX: (flick.contentX - image.x) / root.zoom
-        originY: (flick.contentY - image.y) / root.zoom
+        originX: (flick.contentX - canvasView.x) / root.zoom + root.document.canvasX
+        originY: (flick.contentY - canvasView.y) / root.zoom + root.document.canvasY
         tool: root.tool
         toolColor: root.toolColor
         size: root.size
@@ -253,17 +420,18 @@ ApplicationWindow {
             spacing: 12
 
             Label {
-                readonly property bool inside: root.cursor.x >= 0 && root.cursor.y >= 0
-                                               && root.cursor.x < root.document.imageWidth
-                                               && root.cursor.y < root.document.imageHeight
+                readonly property bool inside: root.cursor.x >= root.document.canvasX && root.cursor.y >= root.document.canvasY
+                                               && root.cursor.x < root.document.canvasX + root.document.canvasWidth
+                                               && root.cursor.y < root.document.canvasY + root.document.canvasHeight
                 Layout.preferredWidth: 130
                 font.pixelSize: 12
                 text: inside ? qsTr("x %1  y %2").arg(Math.floor(root.cursor.x)).arg(Math.floor(root.cursor.y)) : ""
             }
             RowLayout {
                 spacing: 4
-                readonly property color pixel: root.document.pixelAt(Math.floor(root.cursor.x), Math.floor(root.cursor.y))
-                visible: root.cursor.x >= 0
+                readonly property color pixel: root.document.revision >= 0
+                                               ? root.document.pixelAt(Math.floor(root.cursor.x), Math.floor(root.cursor.y)) : "transparent"
+                visible: root.cursor.x !== -1 || root.cursor.y !== -1
                 Rectangle {
                     implicitWidth: 12
                     implicitHeight: 12
@@ -279,7 +447,7 @@ ApplicationWindow {
             }
             Label {
                 font.pixelSize: 12
-                text: qsTr("%1 × %2 px").arg(root.document.imageWidth).arg(root.document.imageHeight)
+                text: qsTr("%1 × %2 px").arg(root.document.canvasWidth).arg(root.document.canvasHeight)
             }
             Label {
                 Layout.fillWidth: true
@@ -317,6 +485,20 @@ ApplicationWindow {
     }
 
     FileDialog {
+        id: addDialog
+        title: qsTr("Add images")
+        fileMode: FileDialog.OpenFiles
+        nameFilters: [qsTr("Images (*.png *.jpg *.jpeg *.bmp *.webp *.gif)"), qsTr("All files (*)")]
+        currentFolder: "file://" + Preferences.saveDirectory
+        onAccepted: {
+            for (const file of selectedFiles)
+                root.document.addImageFile(decodeURIComponent(file.toString().replace(/^file:\/\//, "")))
+            root.pickTool(Document.Select)
+            root.fitIfNeeded()
+        }
+    }
+
+    FileDialog {
         id: openDialog
         title: qsTr("Open image")
         nameFilters: [qsTr("Images and videos (*.png *.jpg *.jpeg *.bmp *.webp *.gif *.mp4 *.webm *.mkv *.avi *.mov)"), qsTr("All files (*)")]
@@ -330,7 +512,7 @@ ApplicationWindow {
         modal: true
         title: qsTr("Discard changes?")
         standardButtons: Dialog.Discard | Dialog.Cancel
-        Label { text: qsTr("The marks on this screenshot are not saved.") }
+        Label { text: qsTr("The changes to this screenshot are not saved.") }
         onDiscarded: {
             root.discardConfirmed = true
             close()
@@ -342,6 +524,7 @@ ApplicationWindow {
     Shortcut { sequence: "Ctrl+S"; onActivated: root.save() }
     Shortcut { sequence: "Ctrl+Shift+S"; onActivated: root.saveAs() }
     Shortcut { sequence: "Ctrl+O"; onActivated: openDialog.open() }
+    Shortcut { sequence: "Ctrl+V"; enabled: !marks.editingText; onActivated: root.addFromClipboard() }
     Shortcut { sequence: "Ctrl+W"; onActivated: root.close() }
     Shortcut { sequence: "Ctrl+Z"; enabled: !marks.editingText; onActivated: root.document.undo() }
     Shortcut { sequences: ["Ctrl+Shift+Z", "Ctrl+Y"]; enabled: !marks.editingText; onActivated: root.document.redo() }
@@ -391,7 +574,7 @@ ApplicationWindow {
                     if (keyHolder.modelData.action)
                         keyHolder.modelData.action()
                     else
-                        root.tool = keyHolder.modelData.tool
+                        root.pickTool(keyHolder.modelData.tool)
                 }
             }
         }

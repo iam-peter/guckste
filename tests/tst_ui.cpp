@@ -121,6 +121,86 @@ private slots:
         QTRY_VERIFY(!window->isVisible());
     }
 
+    // Two screenshots in one editor, reshaped and listed in the layer
+    // panel; a text edited where it is.
+    void editorCombinesAndEdits()
+    {
+        auto *document = new Document;
+        document->setImage(demoScreen(400, 300));
+        QQmlComponent component(m_engine);
+        component.loadFromModule("Guckste", "EditorWindow");
+        auto *window = qobject_cast<QQuickWindow *>(
+            component.createWithInitialProperties({{u"document"_s, QVariant::fromValue(document)}}));
+        QVERIFY2(window, qPrintable(component.errorString()));
+        document->setParent(window);
+        window->resize(1200, 700);
+        window->show();
+        QVERIFY(QTest::qWaitForWindowExposed(window));
+        auto *area = window->findChild<QQuickItem *>(u"drawingArea"_s);
+        QVERIFY(area);
+        const auto view = [&](qreal x, qreal y) {
+            QPointF p;
+            QMetaObject::invokeMethod(area, "toView", Q_RETURN_ARG(QPointF, p), Q_ARG(double, x), Q_ARG(double, y));
+            return area->mapToScene(p).toPoint();
+        };
+
+        const int added = document->addImage(demoScreen(200, 100));
+        QCOMPARE(added, 0);
+        QCOMPARE(document->canvas(), QRect(0, 0, 600, 300));
+        // At 50 % all of it is in view, beside the layer panel.
+        QVERIFY(QMetaObject::invokeMethod(window, "zoomAt", Q_ARG(double, 0.5), Q_ARG(double, 0.0), Q_ARG(double, 0.0)));
+        QTest::qWait(50);
+
+        // The selected image's bottom-right handle, dragged out: it keeps
+        // its shape and the canvas grows with it.
+        const QPoint corner = view(600, 100);
+        QTest::mousePress(window, Qt::LeftButton, Qt::NoModifier, corner);
+        QTest::mouseMove(window, corner + QPoint(50, 10));
+        QTest::mouseMove(window, corner + QPoint(100, 20));
+        QTest::mouseRelease(window, Qt::LeftButton, Qt::NoModifier, corner + QPoint(100, 20));
+        QCOMPARE(document->annotations()[0].rect(), QRectF(400, 0, 400, 200));
+        QCOMPARE(document->canvas(), QRect(0, 0, 800, 300));
+
+        // Dragging the image by its middle moves it.
+        const QPoint middle = view(600, 100);
+        QTest::mousePress(window, Qt::LeftButton, Qt::NoModifier, middle);
+        QTest::mouseMove(window, middle + QPoint(10, 20));
+        QTest::mouseMove(window, middle + QPoint(20, 40));
+        QTest::mouseRelease(window, Qt::LeftButton, Qt::NoModifier, middle + QPoint(20, 40));
+        QCOMPARE(document->annotations()[0].rect(), QRectF(440, 80, 400, 200));
+
+        // A text, double-clicked and retyped in place, stays on its layer.
+        document->addText(40, 40, u"Old"_s, Qt::yellow, 4);
+        QCOMPARE(document->annotationCount(), 2);
+        QTest::qWait(30);
+        const QPoint text = view(50, 50);
+        QTest::mouseDClick(window, Qt::LeftButton, Qt::NoModifier, text);
+        QTRY_VERIFY(area->property("editingText").toBool());
+        QCOMPARE(area->property("editingIndex").toInt(), 1);
+        QTest::keyClick(window, Qt::Key_A, Qt::ControlModifier);
+        for (const char c : {'N', 'e', 'w'})
+            QTest::keyClick(window, c);
+        QTest::keyClick(window, Qt::Key_Return);
+        QTRY_VERIFY(!area->property("editingText").toBool());
+        QCOMPARE(document->annotationCount(), 2);
+        QCOMPARE(document->annotationText(1), u"New"_s);
+        QCOMPARE(document->annotationColor(1), QColor(Qt::yellow));
+
+        // The layer panel lists the text, the image and the screenshot.
+        auto *list = window->findChild<QQuickItem *>(u"layerList"_s);
+        QVERIFY(list);
+        QCOMPARE(list->property("count").toInt(), 3);
+
+        // The export takes in both screenshots.
+        window->setProperty("exportAtZoom", false);
+        QCOMPARE(document->render(1).size(), QSize(840, 300));
+        QTest::qWait(50);
+        saveScreenshot(window, u"editor-layers"_s);
+        window->setProperty("discardConfirmed", true);
+        window->close();
+        QTRY_VERIFY(!window->isVisible());
+    }
+
     void overlayLoads()
     {
         auto *document = new Document;

@@ -138,7 +138,7 @@ The editor shows a screenshot at any zoom from 25 % to 3200 %, each pixel
 a crisp block from 100 % up and a grid between them from 800 % (G toggles
 it). Ctrl+wheel zooms at the pointer, the wheel scrolls, the middle button
 or Space drags the view, Ctrl+0 fits, Ctrl+1 is 100 %. The status bar
-shows the pixel under the pointer, its color and the image size.
+shows the pixel under the pointer, its color and the canvas size.
 
 The same tools draw on it, and marks keep their on-screen size whatever
 the zoom: a 3 px pen is 3 px wide at 400 % too. That is the point of the
@@ -148,7 +148,27 @@ and labels it with their count; the ends snap to pixel edges, so a drag
 from the left edge of one pixel to the right edge of another counts both.
 Alt measures at any angle, with the rounded length marked ≈.
 
-Copy and save export what is on screen: the image enlarged pixel for
+Marks stay editable. With the select tool (V), click a mark to select it
+and drag it to move it. Lines, arrows and measurements have a handle on
+each end; rectangles, ellipses, markers and pixelated areas have handles
+on their corners and edges (Shift keeps them square, or snaps a line to
+45°). Double-click a text to retype it where it is. The color and size
+on the toolbar go to the selected mark. Delete removes it.
+
+Further screenshots and images can be combined with the first one: the
+add button captures a region (the editor steps aside meanwhile, and Enter
+in the overlay adds the region), opens image files, or pastes the
+clipboard (Ctrl+V); images can also be dropped on the window. Each one
+lands right of what is there and can be moved and resized like a mark,
+keeping its shape from a corner unless Shift is held. The canvas grows to
+take in all of them, and what no image covers stays transparent in the
+export.
+
+The layer panel on the right lists every mark and image, topmost first,
+above the screenshot: click one to select it, raise or lower it with the
+arrows, or remove it. Double-clicking a text there edits it too.
+
+Copy and save export what is on screen: the canvas enlarged pixel for
 pixel at the current zoom, with the marks drawn on top at their size.
 Untick "Export at … %" in the status bar to export at the image's own size
 instead, marks scaled down with it. Save (Ctrl+S) writes back to an image
@@ -218,7 +238,6 @@ with their own cursor, key and window code, but have had less testing.
 ## Ideas
 
 - Recording to GIF, and marks that come and go over time.
-- Picking a window under the pointer, as flameshot does.
 - A magnifier while picking the region.
 - Pinning a screenshot to the screen.
 

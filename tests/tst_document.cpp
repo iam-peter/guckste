@@ -3,6 +3,7 @@
 #include "core/AnnotationPainter.h"
 #include "core/Document.h"
 #include "core/FileNaming.h"
+#include "core/LayerModel.h"
 
 #include <QGuiApplication>
 #include <QPainter>
@@ -184,6 +185,156 @@ private slots:
         QCOMPARE(doc.hitTest(20, 20, 1), -1);
         doc.undo();
         QCOMPARE(doc.hitTest(20, 20, 1), 0);
+    }
+
+    // Another screenshot goes right of the first, and the canvas takes
+    // in both; the gap is transparent.
+    void combinesImages()
+    {
+        Document doc;
+        QImage white(40, 30, QImage::Format_ARGB32_Premultiplied);
+        white.fill(Qt::white);
+        doc.setImage(white);
+        QCOMPARE(doc.canvas(), QRect(0, 0, 40, 30));
+        QSignalSpy canvasChanged(&doc, &Document::canvasChanged);
+
+        QImage blue(20, 50, QImage::Format_ARGB32_Premultiplied);
+        blue.fill(Qt::blue);
+        QCOMPARE(doc.addImage(blue), 0);
+        QCOMPARE(doc.selectedIndex(), 0);
+        QCOMPARE(doc.canvas(), QRect(0, 0, 60, 50));
+        QCOMPARE(canvasChanged.count(), 1);
+        QCOMPARE(doc.annotationTool(0), int(Document::Image));
+
+        const QImage out = doc.render(1);
+        QCOMPARE(out.size(), QSize(60, 50));
+        QCOMPARE(out.pixelColor(5, 5), QColor(Qt::white));
+        QCOMPARE(out.pixelColor(45, 45), QColor(Qt::blue));
+        QCOMPARE(out.pixelColor(5, 40).alpha(), 0);
+        QCOMPARE(doc.pixelAt(45, 45), QColor(Qt::blue));
+
+        // Moved up and left: the canvas follows once the move ends, and
+        // the image lands on whole pixels.
+        doc.beginMove(0);
+        doc.moveBy(-30.4, -10.6);
+        QCOMPARE(doc.canvas(), QRect(0, 0, 60, 50));
+        doc.endMove();
+        QCOMPARE(doc.canvas(), QRect(0, -11, 40, 50));
+        QCOMPARE(doc.annotations()[0].rect(), QRectF(10, -11, 20, 50));
+        QCOMPARE(doc.render(2).size(), QSize(80, 100));
+
+        // Pixelating over both mixes the image's pixels in.
+        doc.beginAnnotation(Document::Pixelate, 0, 0, Qt::red, 10);
+        doc.updateAnnotation(40, 30, false);
+        doc.commitAnnotation();
+        const QColor mixed = doc.render(1).pixelColor(15, 11);
+        QVERIFY(mixed.blue() > mixed.red());
+
+        doc.undo();
+        doc.undo();
+        QCOMPARE(doc.canvas(), QRect(0, 0, 60, 50));
+        doc.undo();
+        QCOMPARE(doc.annotationCount(), 0);
+        QCOMPARE(doc.canvas(), QRect(0, 0, 40, 30));
+    }
+
+    void reshapesByHandles()
+    {
+        Document doc;
+        doc.setImage(checkerboard(100, 100));
+
+        // A line's end.
+        doc.beginAnnotation(Document::Arrow, 10, 10, Qt::red, 2);
+        doc.updateAnnotation(50, 10, false);
+        doc.commitAnnotation();
+        QCOMPARE(doc.handlePoints(0).size(), 2);
+        doc.beginHandleDrag(0);
+        doc.dragHandle(1, 60, 52, Qt::ShiftModifier);
+        doc.endHandleDrag();
+        // Snapped to 45°.
+        const QPointF end = doc.annotations()[0].points[1];
+        QVERIFY(std::abs((end.x() - 10) - (end.y() - 10)) < 0.01);
+        QCOMPARE(doc.annotations()[0].points[0], QPointF(10, 10));
+
+        // A rectangle by its bottom-right corner, drawn from the other end.
+        doc.beginAnnotation(Document::Rectangle, 40, 40, Qt::red, 2);
+        doc.updateAnnotation(20, 20, false);
+        doc.commitAnnotation();
+        QCOMPARE(doc.handlePoints(1).size(), 8);
+        QCOMPARE(doc.handlePoints(1)[4].toPointF(), QPointF(40, 40));
+        doc.beginHandleDrag(1);
+        doc.dragHandle(4, 70, 50, 0);
+        doc.endHandleDrag();
+        QCOMPARE(doc.annotations()[1].rect(), QRectF(20, 20, 50, 30));
+        // The top edge, dragged below the bottom, flips over.
+        doc.beginHandleDrag(1);
+        doc.dragHandle(1, 45, 60, 0);
+        doc.endHandleDrag();
+        QCOMPARE(doc.annotations()[1].rect(), QRectF(20, 50, 50, 10));
+        // Squashed flat: nothing changes, and no undo step is left.
+        const int undoBefore = doc.canUndo();
+        doc.beginHandleDrag(1);
+        doc.dragHandle(5, 45, 50, 0);
+        doc.endHandleDrag();
+        QCOMPARE(doc.annotations()[1].rect(), QRectF(20, 50, 50, 10));
+        QCOMPARE(doc.canUndo(), bool(undoBefore));
+
+        // An image keeps its shape from a corner, unless Shift is held.
+        QImage image(40, 20, QImage::Format_ARGB32_Premultiplied);
+        image.fill(Qt::green);
+        const int added = doc.addImage(image, 0, 0);
+        doc.beginHandleDrag(added);
+        doc.dragHandle(4, 80, 25, 0);
+        doc.endHandleDrag();
+        QCOMPARE(doc.annotations()[added].rect(), QRectF(0, 0, 80, 40));
+        doc.beginHandleDrag(added);
+        doc.dragHandle(4, 30, 30, Qt::ShiftModifier);
+        doc.endHandleDrag();
+        QCOMPARE(doc.annotations()[added].rect(), QRectF(0, 0, 30, 30));
+    }
+
+    void restylesAndReorders()
+    {
+        Document doc;
+        doc.setImage(checkerboard(50, 50));
+        doc.beginAnnotation(Document::Line, 0, 0, Qt::red, 2);
+        doc.updateAnnotation(20, 0, false);
+        doc.commitAnnotation();
+        doc.beginAnnotation(Document::Ellipse, 0, 0, Qt::blue, 2);
+        doc.updateAnnotation(20, 20, false);
+        doc.commitAnnotation();
+
+        // A slider dragged through sizes is one undo step.
+        doc.setSelectedIndex(0);
+        for (int size = 3; size <= 9; ++size)
+            doc.setAnnotationSize(0, size);
+        doc.setAnnotationColor(0, Qt::green);
+        QCOMPARE(doc.annotationSize(0), 9.0);
+        QCOMPARE(doc.annotationColor(0), QColor(Qt::green));
+        doc.undo();
+        QCOMPARE(doc.annotationSize(0), 2.0);
+        QCOMPARE(doc.annotationColor(0), QColor(Qt::red));
+
+        LayerModel layers;
+        layers.setDocument(&doc);
+        QCOMPARE(layers.rowCount(), 3);
+        const auto row = [&](int r, int role) { return layers.data(layers.index(r), role); };
+        QCOMPARE(row(0, LayerModel::KindRole).toInt(), int(Document::Ellipse));
+        QCOMPARE(row(1, LayerModel::KindRole).toInt(), int(Document::Line));
+        QVERIFY(row(2, LayerModel::IsBaseRole).toBool());
+        QCOMPARE(row(2, LayerModel::IndexRole).toInt(), -1);
+
+        QSignalSpy reset(&layers, &QAbstractItemModel::modelReset);
+        QSignalSpy dataChanged(&layers, &QAbstractItemModel::dataChanged);
+        doc.setAnnotationColor(0, Qt::yellow);
+        QCOMPARE(reset.count(), 0);
+        QVERIFY(dataChanged.count() >= 1);
+
+        doc.moveLayer(0, 1);
+        QCOMPARE(reset.count(), 1);
+        QCOMPARE(doc.selectedIndex(), 1);
+        QCOMPARE(row(0, LayerModel::KindRole).toInt(), int(Document::Line));
+        QCOMPARE(doc.annotationTool(0), int(Document::Ellipse));
     }
 
     void cropsWithAnnotations()
