@@ -23,8 +23,27 @@ Window {
         return Math.max(low, Math.min(high, value))
     }
 
+    // The screen the region is on; before the window is shown, `Screen`
+    // would be the primary one.
+    function screenOfRegion(): rect {
+        const cx = region.x + region.width / 2
+        const cy = region.y + region.height / 2
+        const screens = Qt.application.screens
+        let all = Qt.rect(0, 0, 0, 0)
+        for (let i = 0; i < screens.length; ++i) {
+            const s = screens[i]
+            const r = Qt.rect(s.virtualX, s.virtualY, s.width, s.height)
+            if (cx >= r.x && cx < r.x + r.width && cy >= r.y && cy < r.y + r.height)
+                return r
+            all = i === 0 ? r : Qt.rect(Math.min(all.x, r.x), Math.min(all.y, r.y),
+                                        Math.max(all.x + all.width, r.x + r.width) - Math.min(all.x, r.x),
+                                        Math.max(all.y + all.height, r.y + r.height) - Math.min(all.y, r.y))
+        }
+        return all
+    }
+
     function place() {
-        const screenRect = Qt.rect(Screen.virtualX, Screen.virtualY, Screen.width, Screen.height)
+        const screenRect = screenOfRegion()
         x = clamp(region.x + region.width / 2 - width / 2, screenRect.x + 8, screenRect.x + screenRect.width - width - 8)
         if (region.y - height - 12 >= screenRect.y)
             y = region.y - height - 12
