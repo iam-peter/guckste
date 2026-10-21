@@ -29,6 +29,8 @@ ToolBar {
     property bool overflow: false
     // The width of everything in one row, overflowed or not.
     property real fullWidth: 0
+    // The width of what went behind the more button, in one row.
+    property real overflowWidth: 0
 
     // The last color from the picker that is not in the palette.
     property color customColor: "transparent"
@@ -137,6 +139,10 @@ ToolBar {
             units[i].parent = i < fit ? row : moreFlow
         moreButton.parent = row
         moreButton.visible = fit < units.length
+        let rest = 0
+        for (let i = fit; i < units.length; ++i)
+            rest += units[i].implicitWidth + (i > fit ? unitSpacing : 0)
+        overflowWidth = rest
         if (fit === units.length)
             morePopup.close()
     }
@@ -190,9 +196,13 @@ ToolBar {
         Popup {
             id: morePopup
             objectName: "morePopup"
+            // A press on the button itself is left to it, so it closes the
+            // menu instead of closing and opening it again.
+            closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutsideParent
             y: moreButton.height + 6
             x: moreButton.width - width
-            width: Math.min(bar.width - 8, Math.max(moreFlow.implicitWidth, 200) + leftPadding + rightPadding)
+            // As wide as what it holds, in one row if the bar is wide enough.
+            width: Math.min(bar.width - 8, bar.overflowWidth + leftPadding + rightPadding)
             padding: 6
             background: Rectangle {
                 color: bar.dark ? Theme.panel : bar.palette.window

@@ -572,8 +572,27 @@ private slots:
         QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier, button.center().toPoint());
         auto *popup = window->findChild<QObject *>(u"morePopup"_s);
         QTRY_VERIFY(popup->property("opened").toBool());
+        // As wide as what it holds, not wider.
+        const qreal held = toolbar->property("overflowWidth").toReal();
+        QVERIFY(held > 0);
+        QCOMPARE(popup->property("width").toReal(), qMin(toolbar->width() - 8, held + 12));
         QTest::qWait(50);
         saveScreenshot(window, u"editor-narrow"_s);
+
+        // Just too narrow: only the last few go, in a small menu.
+        QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier, button.center().toPoint());
+        QTRY_VERIFY(!popup->property("opened").toBool());
+        window->resize(int(full) - 30, 600);
+        QTRY_VERIFY(more->isVisible());
+        QTest::qWait(50);
+        const QRectF moreAt = more->mapRectToScene(QRectF(0, 0, more->width(), more->height()));
+        QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier, moreAt.center().toPoint());
+        QTRY_VERIFY(popup->property("opened").toBool());
+        const qreal few = toolbar->property("overflowWidth").toReal();
+        QVERIFY2(few < 120, qPrintable(QString::number(few)));
+        QCOMPARE(popup->property("width").toReal(), few + 12);
+        QTest::qWait(50);
+        saveScreenshot(window, u"editor-few"_s);
 
         window->resize(int(full) + 60, 600);
         QTRY_VERIFY(!more->isVisible());
