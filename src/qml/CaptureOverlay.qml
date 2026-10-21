@@ -163,7 +163,7 @@ Window {
     // A click with no drag: the badge of last time's region, the window
     // under the pointer, or the whole screen.
     function pickAt(x: real, y: real) {
-        if (onLastBadge(x, y)) {
+        if (mouse.pressedBadge) {
             setSelection(lastRegion.x, lastRegion.y, lastRegion.width, lastRegion.height)
             return
         }
@@ -455,6 +455,7 @@ Window {
         property string mode: ""
         property point anchor
         property rect pressedWindow
+        property bool pressedBadge: false
         property rect startSelection
         property int handle: -1
         property point last
@@ -509,7 +510,9 @@ Window {
             }
             textEntry.commit()
             if (!root.hasSelection) {
+                // Noted before "select" mode hides them.
                 pressedWindow = root.hoveredWindow
+                pressedBadge = root.onLastBadge(event.x, event.y)
                 mode = "select"
                 anchor = p
                 return

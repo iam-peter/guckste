@@ -8,6 +8,7 @@
 #include "core/ScreenRecorder.h"
 #include "core/VideoExporter.h"
 #include "core/VideoFrames.h"
+#include "core/WindowFinder.h"
 #include "core/SingleInstance.h"
 
 #include <QFileInfo>
@@ -302,6 +303,16 @@ private slots:
         QCOMPARE(pressed.first().first().toString(), u"F13"_s);
         listener.end();
         QVERIFY(!listener.isRunning());
+    }
+
+    void listsVisibleWindows()
+    {
+        // Offscreen there are none, but the call has to hold up.
+        const QList<QRect> windows = WindowFinder::windows();
+        for (const QRect &r : windows) {
+            QVERIFY(r.width() > 1 && r.height() > 1);
+            qInfo("window %d,%d %dx%d", r.x(), r.y(), r.width(), r.height());
+        }
     }
 
     void startsOnlyWithAScreen()
