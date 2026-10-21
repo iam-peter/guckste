@@ -59,11 +59,12 @@ The screen is dimmed and a crosshair follows the pointer with its
 coordinates. A bar at the top of the pointer's screen picks the way:
 **Region** (3) is for dragging one out; **Window** (2) outlines the
 window under the pointer, frame included, and a click takes it;
-**Screen** (1) does the same with the screen; **All screens** (4, or
-Ctrl+A) takes everything; and **Previous** (5) takes the region of last
-time, drawn dashed, so the same part of the screen can be captured or
-recorded over and over. A drag picks a region in any mode, and the mode
-is kept for the next time. The region can be dragged, resized
+**Screen** (1) does the same with the screen; **All screens** (4)
+selects everything at once; and **Previous** (5) takes the region of
+last time, drawn dashed, so the same part of the screen can be captured
+or recorded over and over. A drag picks a region in any mode, switching
+the mode drops the region picked so far, and the mode is kept for the
+next time; Ctrl+A selects everything in any mode. The region can be dragged, resized
 by its handles and nudged with the arrow keys (Shift for 10 px). A toolbar
 appears under it:
 

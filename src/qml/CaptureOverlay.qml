@@ -22,8 +22,9 @@ Window {
     // The screen the pointer was on when the overlay opened, in capture
     // coordinates: the mode bar goes there.
     property rect pointerScreen: Qt.rect(0, 0, 0, 0)
-    // How a click picks: "screen", "window" or "region" (a drag always
-    // picks a region, whatever the mode). Kept between screenshots.
+    // How a click picks: "screen", "window", "region" or "all" (a drag
+    // always picks a region, whatever the mode). Kept between screenshots;
+    // "all" also selects every screen right away.
     property string pickMode: Preferences.pickMode
     onPickModeChanged: Preferences.pickMode = pickMode
     // A region to start with, in screen coordinates: after a timer.
@@ -78,6 +79,12 @@ Window {
         }
         return Qt.rect(0, 0, 0, 0)
     }
+
+    // What a click takes in the current mode, in image pixels.
+    readonly property rect hoveredTarget: pickMode === "screen" ? hoveredScreen
+                                        : pickMode === "window" ? hoveredWindow
+                                        : pickMode === "all" && picking ? Qt.rect(0, 0, document.imageWidth, document.imageHeight)
+                                        : Qt.rect(0, 0, 0, 0)
 
     // The screen under the pointer, in image pixels, while picking.
     readonly property rect hoveredScreen: {
@@ -185,6 +192,16 @@ Window {
         setSelection(0, 0, document.imageWidth, document.imageHeight)
     }
 
+    // Switching the mode starts the pick over: a region already taken
+    // would cover what the new mode outlines, all of it for "all".
+    function setPickMode(mode: string) {
+        if (hasSelection)
+            clearSelection()
+        pickMode = mode
+        if (mode === "all")
+            takeAllScreens()
+    }
+
     // The region captured again after the timer, in screen coordinates.
     function selectionOnScreen(): rect {
         return Qt.rect(Math.round(screenGeometry.x + selection.x / imageScale),
@@ -204,6 +221,8 @@ Window {
         if (presetRegion.width > 0)
             setSelection((presetRegion.x - screenGeometry.x) * imageScale, (presetRegion.y - screenGeometry.y) * imageScale,
                          presetRegion.width * imageScale, presetRegion.height * imageScale)
+        else if (pickMode === "all")
+            takeAllScreens()
     }
 
     // A click with no drag takes what the mode highlighted.
@@ -338,7 +357,7 @@ Window {
 
     // The window or screen under the pointer: click to take it.
     Rectangle {
-        readonly property rect target: root.pickMode === "screen" ? root.hoveredScreen : root.hoveredWindow
+        readonly property rect target: root.hoveredTarget
         visible: target.width > 0
         x: target.x * root.zoom
         y: target.y * root.zoom
@@ -531,7 +550,7 @@ Window {
             textEntry.commit()
             if (!root.hasSelection) {
                 // Noted before "select" mode hides the highlight.
-                pressedTarget = root.pickMode === "screen" ? root.hoveredScreen : root.hoveredWindow
+                pressedTarget = root.hoveredTarget
                 mode = "select"
                 anchor = p
                 return
@@ -559,7 +578,7 @@ Window {
                     startSelection = root.selection
                     anchor = p
                 } else {
-                    pressedTarget = root.pickMode === "screen" ? root.hoveredScreen : root.hoveredWindow
+                    pressedTarget = root.hoveredTarget
                     mode = "select"
                     anchor = p
                 }
@@ -653,6 +672,7 @@ Window {
                     { mode: "screen", icon: "monitor", text: qsTr("Screen"), tip: qsTr("Click a screen (1)") },
                     { mode: "window", icon: "app-window", text: qsTr("Window"), tip: qsTr("Click a window (2)") },
                     { mode: "region", icon: "square-dashed", text: qsTr("Region"), tip: qsTr("Drag out a region (3)") },
+                    { mode: "all", icon: "layout-grid", text: qsTr("All screens"), tip: qsTr("Take all screens at once (4)") },
                 ]
                 IconButton {
                     required property var modelData
@@ -661,14 +681,8 @@ Window {
                     tip: modelData.tip
                     checkable: true
                     checked: root.pickMode === modelData.mode
-                    onClicked: root.pickMode = modelData.mode
+                    onClicked: root.setPickMode(modelData.mode)
                 }
-            }
-            IconButton {
-                iconName: "layout-grid"
-                text: qsTr("All screens")
-                tip: qsTr("Take all screens at once (4)")
-                onClicked: root.takeAllScreens()
             }
             IconButton {
                 iconName: "history"
@@ -777,10 +791,10 @@ Window {
         onActivated: root.document.removeAnnotation(root.document.selectedIndex)
     }
     Shortcut { sequence: "Ctrl+A"; enabled: !textEntry.visible; onActivated: root.setSelection(0, 0, root.document.imageWidth, root.document.imageHeight) }
-    Shortcut { sequence: "1"; enabled: !textEntry.visible; onActivated: root.pickMode = "screen" }
-    Shortcut { sequence: "2"; enabled: !textEntry.visible; onActivated: root.pickMode = "window" }
-    Shortcut { sequence: "3"; enabled: !textEntry.visible; onActivated: root.pickMode = "region" }
-    Shortcut { sequence: "4"; enabled: !textEntry.visible; onActivated: root.takeAllScreens() }
+    Shortcut { sequence: "1"; enabled: !textEntry.visible; onActivated: root.setPickMode("screen") }
+    Shortcut { sequence: "2"; enabled: !textEntry.visible; onActivated: root.setPickMode("window") }
+    Shortcut { sequence: "3"; enabled: !textEntry.visible; onActivated: root.setPickMode("region") }
+    Shortcut { sequence: "4"; enabled: !textEntry.visible; onActivated: root.setPickMode("all") }
     Shortcut { sequence: "5"; enabled: !textEntry.visible; onActivated: root.takeLastRegion() }
     Shortcut { sequence: "Left"; enabled: !textEntry.visible; onActivated: root.nudge(-1, 0) }
     Shortcut { sequence: "Right"; enabled: !textEntry.visible; onActivated: root.nudge(1, 0) }
