@@ -120,14 +120,18 @@ ApplicationWindow {
 
     MediaPlayer {
         id: player
+        objectName: "player"
         source: "file://" + root.sourcePath
         videoOutput: videoView
         audioOutput: AudioOutput {}
         // Nothing is shown until the player renders a frame, which a seek
         // makes it do, as scrubbing does; a play that is paused at once
-        // does not.
+        // does not. Only when the file first loads: the player reports it
+        // loaded again while playing and seeking, and would stop each time.
+        property bool showedFirstFrame: false
         onMediaStatusChanged: {
-            if (player.mediaStatus === MediaPlayer.LoadedMedia) {
+            if (player.mediaStatus === MediaPlayer.LoadedMedia && !showedFirstFrame) {
+                showedFirstFrame = true
                 player.pause()
                 firstFrame.restart()
             }
@@ -229,6 +233,7 @@ ApplicationWindow {
                 }
                 IconButton { iconName: "step-back"; tip: qsTr("A frame back (,)"); onClicked: root.stepFrame(-1) }
                 IconButton {
+                    objectName: "playButton"
                     iconName: player.playbackState === MediaPlayer.PlayingState ? "pause" : "play"
                     tip: qsTr("Play or pause (Space)")
                     onClicked: root.togglePlay()

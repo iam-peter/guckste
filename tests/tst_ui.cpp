@@ -3,6 +3,8 @@
 // GUCKSTE_SITE_SHOTS to stage the screenshots of the README and the site.
 
 #include "core/Document.h"
+#include "core/Encoding.h"
+#include "core/VideoFrames.h"
 #include "core/Preferences.h"
 #include "core/VideoExporter.h"
 #include "ui/App.h"
@@ -10,6 +12,11 @@
 
 #include <QApplication>
 #include <QDir>
+#include <QMediaCaptureSession>
+#include <QMediaPlayer>
+#include <QMediaRecorder>
+#include <QTemporaryDir>
+#include <QVideoFrameInput>
 #include <QPainter>
 #include <QPainterPath>
 #include <QQmlApplicationEngine>
@@ -153,6 +160,37 @@ QImage desktop(QSize size, const QList<std::pair<QImage, QPoint>> &windows)
         p.drawImage(at, window);
     }
     return image;
+}
+
+// A short video of one color, written from frames.
+QString writeVideo(const QString &path, int frames, const QColor &color)
+{
+    QMediaCaptureSession session;
+    QVideoFrameInput input;
+    QMediaRecorder recorder;
+    session.setVideoFrameInput(&input);
+    session.setRecorder(&recorder);
+    QMediaFormat format = Encoding::bestFormat();
+    format.setAudioCodec(QMediaFormat::AudioCodec::Unspecified);
+    recorder.setMediaFormat(format);
+    recorder.setVideoFrameRate(30);
+    recorder.setVideoResolution(QSize(320, 240));
+    recorder.setOutputLocation(QUrl::fromLocalFile(path));
+    recorder.record();
+    QImage image(320, 240, QImage::Format_RGB32);
+    image.fill(color);
+    for (int i = 0; i < frames; ++i) {
+        QVideoFrame frame = VideoFrames::toNV12(image);
+        frame.setStartTime(i * 33333);
+        frame.setEndTime((i + 1) * 33333);
+        if (!QTest::qWaitFor([&input, &frame] { return input.sendVideoFrame(frame); }, 5000))
+            return {};
+    }
+    QTest::qWait(300);
+    recorder.stop();
+    if (!QTest::qWaitFor([&recorder] { return recorder.recorderState() == QMediaRecorder::StoppedState; }, 10000))
+        return {};
+    return recorder.actualLocation().toLocalFile();
 }
 } // namespace
 
@@ -821,6 +859,52 @@ private slots:
         QCOMPARE(m_time, u"01:05"_s);
         window->close();
         delete window;
+    }
+
+    // Play plays: the position runs on, and the button turns to pause.
+    void videoEditorPlays()
+    {
+        QTemporaryDir dir;
+        const QString clip = writeVideo(dir.path() + u"/clip.mp4"_s, 90, Qt::darkCyan);
+        QVERIFY(!clip.isEmpty());
+        auto *document = new Document;
+        auto *exporter = new VideoExporter;
+        QQmlComponent component(m_engine);
+        component.loadFromModule("Guckste", "VideoEditorWindow");
+        auto *window = qobject_cast<QQuickWindow *>(component.createWithInitialProperties(
+            {{u"document"_s, QVariant::fromValue(document)}, {u"sourcePath"_s, clip},
+             {u"exporter"_s, QVariant::fromValue(exporter)}}));
+        QVERIFY2(window, qPrintable(component.errorString()));
+        document->setParent(window);
+        exporter->setParent(window);
+        window->show();
+        QVERIFY(QTest::qWaitForWindowExposed(window));
+        auto *player = window->findChild<QMediaPlayer *>(u"player"_s);
+        auto *play = window->findChild<QQuickItem *>(u"playButton"_s);
+        QVERIFY(player && play);
+        QTRY_VERIFY_WITH_TIMEOUT(player->duration() > 2000, 5000);
+        QTest::qWait(500);
+
+        const QPoint at = play->mapToScene(QPointF(play->width() / 2, play->height() / 2)).toPoint();
+        QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier, at);
+        QTest::qWait(1000);
+        QCOMPARE(player->playbackState(), QMediaPlayer::PlayingState);
+        QVERIFY(player->position() > 300);
+
+        // Again: paused where it was; once more: on from there.
+        QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier, at);
+        QTRY_COMPARE(player->playbackState(), QMediaPlayer::PausedState);
+        const qint64 paused = player->position();
+        QTest::qWait(300);
+        QVERIFY(std::abs(player->position() - paused) < 100);
+        QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier, at);
+        QTest::qWait(500);
+        QCOMPARE(player->playbackState(), QMediaPlayer::PlayingState);
+        QVERIFY(player->position() > paused + 200);
+
+        window->setProperty("discardConfirmed", true);
+        window->close();
+        QTRY_VERIFY(!window->isVisible());
     }
 
     void videoEditorLoads()
