@@ -6,10 +6,14 @@
 
 A screenshot and screen recording tool for the tray, written with Qt
 Quick. It works like flameshot: a click on the tray icon or `guckste gui`
-freezes the screen, you drag out a region, draw on it, and copy or save it.
-On top of that it has an editor that enlarges a screenshot pixel for pixel,
-to draw on it at that size and to put measurement marks on it that count
-the pixels. The same region picker starts a recording of that region.
+freezes the screen, you pick a region, a window or a screen, draw on it,
+and copy or save it. On top of that it has an editor that enlarges a
+screenshot pixel for pixel, puts measurement marks on it that count the
+pixels, combines several screenshots into one picture with a layer panel
+and GIMP-style guides, and keeps every mark editable. The same picker
+starts a recording, which opens in a video editor to trim it and to draw
+on it, each mark showing for a time of its own, set on lanes under the
+timeline.
 
 ![The editor combining a settings window and a terminal into one picture, with marks, a measurement, a guide and the layer panel](docs/screenshots/editor.png)
 
@@ -58,7 +62,8 @@ quits the running one and takes its place, for a new build):
 ![The capture overlay with a region picked around a settings window and marked up](docs/screenshots/overlay.png)
 
 The screen is dimmed and a crosshair follows the pointer with its
-coordinates. A bar at the top of the pointer's screen picks the way:
+coordinates. A bar at the top of the screen the pointer is on, which
+follows it from screen to screen, picks the way:
 **Region** (3) is for dragging one out; **Window** (2) outlines the
 window under the pointer, frame included, and a click takes it;
 **Screen** (1) does the same with the screen; **All screens** (4)
@@ -68,9 +73,9 @@ screen can be captured or recorded over and over. A drag picks a region
 in any mode, switching the mode drops the region picked so far, and the
 mode is kept for the next time, so All screens and Previous have their
 region selected as soon as the overlay opens. Ctrl+A selects everything
-in any mode. The region can be dragged, resized
-by its handles and nudged with the arrow keys (Shift for 10 px). A toolbar
-appears under it:
+in any mode. The region can be dragged, resized by its handles and
+nudged with the arrow keys (Shift for 10 px). A toolbar appears under
+it:
 
 - Tools: select (V), pen (P), line (L), arrow (A), rectangle (R), ellipse
   (O), marker (M), text (T), pixelate (X), numbered marker (N), measure (D).
@@ -98,7 +103,8 @@ Screen… record the region to a video. A red frame marks the region and a
 small panel outside it shows the time, with pause and stop; the panel can
 be dragged anywhere. Neither is in the recording. When a whole screen is
 recorded there is no panel: the tray menu's Stop Recording or `guckste
-record` ends it.
+record` ends it. A pause cuts the time out of the video; there is none
+while the microphone is recorded, whose sound would not follow the cut.
 
 The panel says "Starting…" for the first 1.5 seconds, which are left out:
 windows the overlay covered, like a browser playing a video, stop drawing
@@ -169,12 +175,13 @@ at its end.
 
 The same tools draw on it, and marks are part of the image: sizes are in
 image pixels, so a 3 px pen and a 20 px text grow with the screenshot
-when zooming in, as in any image editor. Measure marks are the exception:
-their line and label keep their size on screen, so they stay readable at
-800 % and beyond. The measure tool drags a line along a row or column of pixels
-and labels it with their count; the ends snap to pixel edges, so a drag
-from the left edge of one pixel to the right edge of another counts both.
-Alt measures at any angle, with the rounded length marked ≈.
+when zooming in, as in any image editor. Measure marks are the
+exception: their line and label keep their size on screen, so they stay
+readable at 800 % and beyond. The measure tool drags a line along a row
+or column of pixels and labels it with their count; the ends snap to
+pixel edges, so a drag from the left edge of one pixel to the right edge
+of another counts both. Alt measures at any angle, with the rounded
+length marked ≈.
 
 ![The editor at 800 % measuring a label 39 px wide and a gap of 8 px between two fields](docs/screenshots/measure.png)
 
@@ -209,25 +216,38 @@ arrows, or remove it. Double-clicking a text there edits it too.
 
 Copy and save export what is on screen: the canvas enlarged pixel for
 pixel at the current zoom, with the marks enlarged along. Untick "Export
-at … %" in the status bar to export at the image's own size instead. Save (Ctrl+S) writes back to an image
-that was opened from a file when exporting at 100 %, otherwise it asks for
-a name; Save as… (Ctrl+Shift+S) always asks.
+at … %" in the status bar to export at the image's own size instead.
+Save (Ctrl+S) writes back to an image that was opened from a file when
+exporting at 100 %, otherwise it asks for a name; Save as…
+(Ctrl+Shift+S) always asks.
 
 ### Settings
 
-The screenshot folder (Pictures/Screenshots by default) and the file name
-pattern (`guckste_%Y-%m-%d_%H-%M-%S`, with strftime's `%Y %m %d %H %M %S
-%b %a`; a number is appended when the name is taken; recordings use it
-too), whether the saved file's path goes to the clipboard, the pixel grid,
-the recording frame rate and microphone, and launching at login, which
-writes `~/.config/autostart/guckste.desktop` on Linux.
+- The screenshot folder (Pictures/Screenshots by default) and the file
+  name pattern (`guckste_%Y-%m-%d_%H-%M-%S`, with strftime's `%Y %m %d %H
+  %M %S %b %a`; a number is appended when the name is taken; recordings
+  use it too).
+- Whether the pointer is in screenshots and recordings, and whether the
+  keys pressed are shown on recordings.
+- Whether a saved file's path goes to the clipboard, and the editor's
+  pixel grid from 800 %.
+- Recording: the frame rate (15, 24, 30 or 60 fps), the quality, the
+  microphone, and whether a recording opens in the video editor or goes
+  straight to the screenshot folder.
+- Launching at login, which writes `~/.config/autostart/guckste.desktop`
+  on Linux.
+
+The picker remembers its mode, the last region, the color and the sizes;
+the editor remembers snapping to guides and exporting them.
 
 ## Building
 
-Requires Qt ≥ 6.9 and CMake ≥ 3.21. On Linux QtDBus is used, if found, to
-ask the desktop portal for screenshots on Wayland, and the X11 libraries
-Xfixes and Xi (libxfixes-dev, libxi-dev) for the pointer image and the
-keys pressed.
+Requires Qt ≥ 6.9 with Qt Multimedia, and CMake ≥ 3.21. On Linux QtDBus
+is used, if found, to ask the desktop portal for screenshots on Wayland,
+and the X11 libraries Xfixes, Xi and Xext (libxfixes-dev, libxi-dev,
+libxext-dev) for the pointer image, the keys pressed and grabbing the
+screen through shared memory, which opens the picker several times
+faster than Qt's own grab.
 
 ```bash
 cmake -B build -G Ninja -DCMAKE_PREFIX_PATH=$HOME/Qt/6.12.0/gcc_64
@@ -235,6 +255,9 @@ cmake --build build
 ctest --test-dir build --output-on-failure
 ./build/bin/guckste
 ```
+
+For daily use, build with `-DCMAKE_BUILD_TYPE=Release`; a debug build is
+noticeably slower to open the picker and to grab the screen.
 
 `cmake --install build` also installs a desktop file with a launcher action
 for each command, and the icon. `tst_ui` saves screenshots of the windows
@@ -248,25 +271,32 @@ build next to the Guckste in use, give it its own instance name:
 ## Layout
 
 - `src/core` — no Qt Quick dependency: `Annotation` (one mark or added
-  image, its geometry and sizes in image pixels),
-  `AnnotationPainter` (draws marks with a QPainter at any scale, the same
-  way on screen and into the export), `Document` (the image, its marks,
-  undo, rendering and saving), `ScreenCapture` (every screen through Qt,
-  or the desktop portal on Wayland), `ScreenRecorder` (QScreenCapture
-  frames cropped to the region and encoded by QMediaRecorder),
-  `VideoExporter` (plays a recording back into a recorder, marks painted
-  on every frame, trim applied), `Encoding` and `VideoFrames` (the format
-  this Qt encodes, bit rates, frames as NV12), `SingleInstance` (one
-  Guckste per user, by a lock file and a local socket), `Preferences`
-  and `FileNaming`.
+  image, its geometry and sizes in image pixels, and its time on a
+  recording), `AnnotationPainter` (draws marks with a QPainter at any
+  scale, the same way on screen and into the export), `Document` (the
+  image, its marks and guides, undo, the canvas, handles, rendering and
+  saving), `LayerModel` (a document's marks as a list, for the layer
+  panel and the lanes), `ScreenCapture` (every screen through Qt, the X
+  root window through shared memory, or the desktop portal on Wayland),
+  `WindowFinder` (the windows on screen, for picking one), `CursorCapture`
+  and `KeyListener` with `KeyOverlay` (the pointer and the keys pressed,
+  per platform), `ScreenRecorder` (QScreenCapture frames cropped to the
+  region and encoded by QMediaRecorder), `VideoExporter` (plays a
+  recording back into a recorder, each mark painted on the frames of its
+  time, trim applied), `Encoding` and `VideoFrames` (the format this Qt
+  encodes, bit rates, frames as NV12), `SingleInstance` (one Guckste per
+  user, by a lock file and a local socket), `Preferences` and
+  `FileNaming`.
 - `src/ui` — `AnnotationLayer`, the item that paints a document's marks
   over the image at the view's zoom, sized to the viewport rather than the
-  image; `App`, the tray icon and the windows; the image provider that
-  shows documents to QML.
-- `src/qml` — `CaptureOverlay`, `EditorWindow`, `VideoEditorWindow`,
-  `SettingsWindow`, `RecordingControls`, the `Timeline`, and what the
-  editors share: the `AnnotationToolbar` and the `DrawingArea` with the
-  pointer handling of every tool (QML module `Guckste`).
+  image; `Ruler`, the editor's rulers; `App`, the tray icon and the
+  windows; the image provider that shows documents to QML.
+- `src/qml` — `CaptureOverlay`, `EditorWindow` with its `LayerPanel`,
+  `VideoEditorWindow` with the `Timeline` and its `TimelineLanes`,
+  `SettingsWindow`, `RecordingControls`, the timer's `Countdown`, and what
+  the windows share: the `AnnotationToolbar` with its `ColorPicker`, and
+  the `DrawingArea` with the pointer handling of every tool, the handles,
+  the guides and the `TextEntry` (QML module `Guckste`).
 
 Platforms: X11 is where it is used and tested. On Wayland the screenshot
 comes from the desktop portal and the overlay covers the screen it is put
@@ -277,7 +307,7 @@ with their own cursor, key and window code, but have had less testing.
 
 ## Ideas
 
-- Recording to GIF, and marks that come and go over time.
+- Recording to GIF.
 - A magnifier while picking the region.
 - Pinning a screenshot to the screen.
 
