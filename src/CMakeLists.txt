@@ -112,6 +112,7 @@ qt_add_qml_module(guckste_qml
         icons/trash-2.svg
         icons/lock.svg
         icons/clipboard-paste.svg
+        icons/chevrons-right.svg
         icons/circle.svg
         icons/circle-stop.svg
         icons/copy.svg

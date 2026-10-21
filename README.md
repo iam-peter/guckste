@@ -141,7 +141,9 @@ The editor shows a screenshot at any zoom from 25 % to 3200 %, each pixel
 a crisp block from 100 % up and a grid between them from 800 % (G toggles
 it). Ctrl+wheel zooms at the pointer, the wheel scrolls, the middle button
 or Space drags the view, Ctrl+0 fits, Ctrl+1 is 100 %. The status bar
-shows the pixel under the pointer, its color and the canvas size.
+shows the pixel under the pointer, its color and the canvas size. In a
+narrow window, what does not fit on the toolbar moves behind a » button
+at its end.
 
 The same tools draw on it, and marks are part of the image: sizes are in
 image pixels, so a 3 px pen and a 20 px text grow with the screenshot

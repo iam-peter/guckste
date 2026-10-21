@@ -295,6 +295,25 @@ private slots:
         QCOMPARE(document->render(1).size(), QSize(840, 300));
         QTest::qWait(50);
         saveScreenshot(window, u"editor-layers"_s);
+
+        // Closing asks first, in a dialog window of its own.
+        window->close();
+        QWindow *question = nullptr;
+        QTRY_VERIFY((question = [] {
+            for (QWindow *w : QGuiApplication::topLevelWindows())
+                if (w->isVisible() && w->title() == u"Discard changes?"_s)
+                    return w;
+            return static_cast<QWindow *>(nullptr);
+        }()));
+        QVERIFY(question->flags() & Qt::Dialog);
+        QCOMPARE(question->transientParent(), window);
+        QVERIFY(window->isVisible());
+        saveScreenshot(qobject_cast<QQuickWindow *>(question), u"discard"_s);
+        // Cancelled: it is modal, and would block every window after it.
+        auto *dialog = window->findChild<QObject *>(u"discardDialog"_s);
+        QVERIFY(dialog);
+        QMetaObject::invokeMethod(dialog, "reject");
+        QTRY_VERIFY(!question->isVisible());
         window->setProperty("discardConfirmed", true);
         window->close();
         QTRY_VERIFY(!window->isVisible());
@@ -446,6 +465,81 @@ private slots:
         window->setProperty("discardConfirmed", true);
         window->close();
         QTRY_VERIFY(!window->isVisible());
+    }
+
+    // At 100 % every image pixel lands on one screen pixel, whatever the
+    // window's size: half-pixel offsets used to double some and drop others.
+    void editorShowsPixelsExactly()
+    {
+        auto *document = new Document;
+        QImage checker(120, 80, QImage::Format_ARGB32_Premultiplied);
+        for (int y = 0; y < checker.height(); ++y)
+            for (int x = 0; x < checker.width(); ++x)
+                checker.setPixelColor(x, y, (x + y) % 2 ? Qt::white : Qt::black);
+        document->setImage(checker);
+        QQmlComponent component(m_engine);
+        component.loadFromModule("Guckste", "EditorWindow");
+        auto *window = qobject_cast<QQuickWindow *>(
+            component.createWithInitialProperties({{u"document"_s, QVariant::fromValue(document)}}));
+        QVERIFY2(window, qPrintable(component.errorString()));
+        document->setParent(window);
+        window->show();
+        QVERIFY(QTest::qWaitForWindowExposed(window));
+        auto *area = window->findChild<QQuickItem *>(u"drawingArea"_s);
+        for (int width : {901, 902, 903, 1000, 1001}) {
+            window->resize(width, 601 + width % 2);
+            QTest::qWait(60);
+            QPointF p;
+            QMetaObject::invokeMethod(area, "toView", Q_RETURN_ARG(QPointF, p), Q_ARG(double, 0.0), Q_ARG(double, 0.0));
+            const QPointF at = area->mapToScene(p);
+            QCOMPARE(at, QPointF(at.toPoint()));
+            const QImage shown = window->grabWindow().copy(QRect(at.toPoint(), checker.size()));
+            QVERIFY2(shown.convertToFormat(QImage::Format_RGB32) == checker.convertToFormat(QImage::Format_RGB32),
+                     qPrintable(u"not pixel for pixel at width %1"_s.arg(width)));
+        }
+        window->close();
+    }
+
+    // A narrow editor moves what does not fit on its toolbar behind a
+    // more button; widened again, all of it comes back.
+    void editorToolbarOverflows()
+    {
+        auto *document = new Document;
+        document->setImage(demoScreen(300, 200));
+        QQmlComponent component(m_engine);
+        component.loadFromModule("Guckste", "EditorWindow");
+        auto *window = qobject_cast<QQuickWindow *>(
+            component.createWithInitialProperties({{u"document"_s, QVariant::fromValue(document)}}));
+        QVERIFY2(window, qPrintable(component.errorString()));
+        document->setParent(window);
+        window->show();
+        QVERIFY(QTest::qWaitForWindowExposed(window));
+        auto *toolbar = window->findChild<QQuickItem *>(u"toolbar"_s);
+        auto *more = window->findChild<QQuickItem *>(u"moreButton"_s);
+        QVERIFY(toolbar && more);
+        const qreal full = toolbar->property("fullWidth").toReal();
+        QVERIFY(full > 800);
+
+        window->resize(int(full) + 60, 600);
+        QTRY_VERIFY(!more->isVisible());
+
+        window->resize(640, 600);
+        QTRY_VERIFY(more->isVisible());
+        QTest::qWait(50);
+        // Nothing sticks out of the bar.
+        const QRectF bar = toolbar->mapRectToScene(QRectF(0, 0, toolbar->width(), toolbar->height()));
+        const QRectF button = more->mapRectToScene(QRectF(0, 0, more->width(), more->height()));
+        QVERIFY2(button.right() <= bar.right() + 0.5, qPrintable(u"more ends at %1 of %2"_s.arg(button.right()).arg(bar.right())));
+        QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier, button.center().toPoint());
+        auto *popup = window->findChild<QObject *>(u"morePopup"_s);
+        QTRY_VERIFY(popup->property("opened").toBool());
+        QTest::qWait(50);
+        saveScreenshot(window, u"editor-narrow"_s);
+
+        window->resize(int(full) + 60, 600);
+        QTRY_VERIFY(!more->isVisible());
+        QTRY_VERIFY(!popup->property("opened").toBool());
+        window->close();
     }
 
     void overlayLoads()

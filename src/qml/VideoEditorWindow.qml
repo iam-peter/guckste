@@ -149,6 +149,7 @@ ApplicationWindow {
     }
 
     header: AnnotationToolbar {
+        overflow: true
         tool: root.tool
         color: root.toolColor
         size: root.size
@@ -318,8 +319,13 @@ ApplicationWindow {
 
     Dialog {
         id: discardDialog
+        objectName: "discardDialog"
         anchors.centerIn: parent
         modal: true
+        // A window of its own, titled and decorated by the desktop like
+        // the settings, rather than a panel drawn into the editor.
+        popupType: Popup.Window
+        padding: 16
         title: root.temporary ? qsTr("Discard the recording?") : qsTr("Discard the changes?")
         standardButtons: Dialog.Discard | Dialog.Cancel
         Label { text: root.temporary ? qsTr("It has not been saved and will be deleted.") : qsTr("The marks and the trim are not saved.") }

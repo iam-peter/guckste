@@ -23,6 +23,12 @@ ToolBar {
     // The overlay's floating look: a dark panel with light icons.
     property bool dark: false
     default property alias actions: actionsRow.data
+    // Narrower than its content, the bar moves what does not fit, from the
+    // end, into a menu behind a "more" button. For bars across a window;
+    // a floating bar sizes itself to fit instead.
+    property bool overflow: false
+    // The width of everything in one row, overflowed or not.
+    property real fullWidth: 0
 
     // The last color from the picker that is not in the palette.
     property color customColor: "transparent"
@@ -31,7 +37,6 @@ ToolBar {
             customColor = color
     }
     onColorChanged: noteCustomColor()
-    Component.onCompleted: noteCustomColor()
 
     component Swatch: Rectangle {
         id: swatch
@@ -93,12 +98,117 @@ ToolBar {
         }
     }
 
-    // The row alone sizes the bar.
-    contentWidth: row.implicitWidth
+    // Everything in one row sizes the bar.
+    contentWidth: fullWidth
     contentHeight: row.implicitHeight
+
+    // In order: the groups of the bar, then each of the window's actions.
+    // What fits stays in the row, the rest goes behind the more button.
+    property var units: []
+    readonly property int unitSpacing: 2
+
+    function relayout() {
+        if (units.length === 0)
+            return
+        let all = 0
+        for (let i = 0; i < units.length; ++i)
+            all += units[i].implicitWidth + (i > 0 ? unitSpacing : 0)
+        fullWidth = all
+        let fit = units.length
+        if (overflow && all > availableWidth) {
+            const room = availableWidth - moreButton.implicitWidth - unitSpacing
+            let total = 0
+            fit = 0
+            for (let i = 0; i < units.length; ++i) {
+                const w = units[i].implicitWidth + (i > 0 ? unitSpacing : 0)
+                if (total + w > room)
+                    break
+                total += w
+                ++fit
+            }
+            // The tools always stay.
+            fit = Math.max(fit, 1)
+        }
+        // Parked first, then placed in order, so both keep the bar's order.
+        for (const unit of units)
+            unit.parent = stash
+        moreButton.parent = stash
+        for (let i = 0; i < units.length; ++i)
+            units[i].parent = i < fit ? row : moreFlow
+        moreButton.parent = row
+        moreButton.visible = fit < units.length
+        if (fit === units.length)
+            morePopup.close()
+    }
+
+    function relayoutLater() {
+        Qt.callLater(relayout)
+    }
+
+    onAvailableWidthChanged: if (overflow) relayoutLater()
+
+    Component.onCompleted: {
+        noteCustomColor()
+        const list = [toolsGroup, colorsGroup, sizeGroup, historyGroup]
+        if (actionsRow.children.length > 0)
+            list.push(actionsSeparator)
+        for (const child of Array.from(actionsRow.children))
+            list.push(child)
+        units = list
+        for (const unit of units)
+            unit.implicitWidthChanged.connect(relayoutLater)
+        relayout()
+    }
+
+    // Where units wait while the row is rebuilt, and where the window's
+    // actions are declared.
+    Item {
+        id: stash
+        visible: false
+        Row {
+            id: actionsRow
+        }
+        ToolSeparator {
+            id: actionsSeparator
+        }
+    }
 
     RowLayout {
         id: row
+        spacing: bar.unitSpacing
+    }
+
+    IconButton {
+        id: moreButton
+        objectName: "moreButton"
+        visible: false
+        iconName: "chevrons-right"
+        tip: qsTr("More")
+        checked: morePopup.opened
+        onClicked: morePopup.opened ? morePopup.close() : morePopup.open()
+
+        Popup {
+            id: morePopup
+            objectName: "morePopup"
+            y: moreButton.height + 6
+            x: moreButton.width - width
+            width: Math.min(bar.width - 8, Math.max(moreFlow.implicitWidth, 200) + leftPadding + rightPadding)
+            padding: 6
+            background: Rectangle {
+                color: bar.dark ? Theme.panel : bar.palette.window
+                radius: 8
+                border.color: bar.dark ? "#55ffffff" : "#40000000"
+                border.width: 1
+            }
+            contentItem: Flow {
+                id: moreFlow
+                spacing: bar.unitSpacing
+            }
+        }
+    }
+
+    RowLayout {
+        id: toolsGroup
         spacing: 2
 
         Repeater {
@@ -112,6 +222,11 @@ ToolBar {
                 onClicked: bar.toolPicked(modelData.tool)
             }
         }
+    }
+
+    RowLayout {
+        id: colorsGroup
+        spacing: 2
 
         ToolSeparator {}
 
@@ -154,6 +269,11 @@ ToolBar {
                 onPicked: picked => bar.colorPicked(picked)
             }
         }
+    }
+
+    RowLayout {
+        id: sizeGroup
+        spacing: 2
 
         ToolSeparator {}
 
@@ -199,6 +319,11 @@ ToolBar {
             ToolTip.text: qsTr("Size: %1 px").arg(Math.round(value))
             ToolTip.visible: hovered || pressed
         }
+    }
+
+    RowLayout {
+        id: historyGroup
+        spacing: 2
 
         ToolSeparator {}
 
@@ -213,15 +338,6 @@ ToolBar {
             tip: qsTr("Redo (Ctrl+Shift+Z)")
             enabled: bar.document ? bar.document.canRedo : false
             onClicked: bar.document.redo()
-        }
-
-        ToolSeparator {
-            visible: actionsRow.children.length > 0
-        }
-
-        Row {
-            id: actionsRow
-            spacing: 2
         }
     }
 }

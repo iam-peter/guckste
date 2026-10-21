@@ -61,8 +61,8 @@ ApplicationWindow {
         const contentHeight = Math.max(flick.height, document.canvasHeight * zoom)
         const canvasX = (contentWidth - document.canvasWidth * zoom) / 2
         const canvasY = (contentHeight - document.canvasHeight * zoom) / 2
-        flick.contentX = clamp((p.x - document.canvasX) * zoom + canvasX - viewX, 0, contentWidth - flick.width)
-        flick.contentY = clamp((p.y - document.canvasY) * zoom + canvasY - viewY, 0, contentHeight - flick.height)
+        flick.contentX = Math.round(clamp((p.x - document.canvasX) * zoom + canvasX - viewX, 0, contentWidth - flick.width))
+        flick.contentY = Math.round(clamp((p.y - document.canvasY) * zoom + canvasY - viewY, 0, contentHeight - flick.height))
     }
 
     function zoomStep(direction: int) {
@@ -93,8 +93,8 @@ ApplicationWindow {
         const dy = (shownCanvas.y - now.y) * zoom
         shownCanvas = now
         Qt.callLater(() => {
-            flick.contentX = clamp(flick.contentX + dx, 0, Math.max(0, flick.contentWidth - flick.width))
-            flick.contentY = clamp(flick.contentY + dy, 0, Math.max(0, flick.contentHeight - flick.height))
+            flick.contentX = Math.round(clamp(flick.contentX + dx, 0, Math.max(0, flick.contentWidth - flick.width)))
+            flick.contentY = Math.round(clamp(flick.contentY + dy, 0, Math.max(0, flick.contentHeight - flick.height)))
         })
     }
 
@@ -228,6 +228,7 @@ ApplicationWindow {
 
     header: AnnotationToolbar {
         id: toolbar
+        overflow: true
         objectName: "toolbar"
         tool: root.tool
         color: root.toolColor
@@ -440,8 +441,11 @@ ApplicationWindow {
         anchors.topMargin: root.rulerSize
         anchors.bottom: parent.bottom
         anchors.right: root.showLayers ? layers.left : parent.right
-        contentWidth: Math.max(width, root.document.canvasWidth * root.zoom)
-        contentHeight: Math.max(height, root.document.canvasHeight * root.zoom)
+        contentWidth: Math.max(width, Math.round(root.document.canvasWidth * root.zoom))
+        contentHeight: Math.max(height, Math.round(root.document.canvasHeight * root.zoom))
+        // The scroll bars move by fractions too.
+        onContentXChanged: if (contentX !== Math.round(contentX)) contentX = Math.round(contentX)
+        onContentYChanged: if (contentY !== Math.round(contentY)) contentY = Math.round(contentY)
         clip: true
         boundsBehavior: Flickable.StopAtBounds
         interactive: false
@@ -452,8 +456,10 @@ ApplicationWindow {
         // transparent in what is exported.
         Item {
             id: canvasView
-            x: (flick.contentWidth - width) / 2
-            y: (flick.contentHeight - height) / 2
+            // On whole pixels: an image shown unsmoothed at a half-pixel
+            // offset doubles some pixels and drops others.
+            x: Math.round((flick.contentWidth - width) / 2)
+            y: Math.round((flick.contentHeight - height) / 2)
             width: root.document.canvasWidth * root.zoom
             height: root.document.canvasHeight * root.zoom
 
@@ -467,8 +473,8 @@ ApplicationWindow {
 
             Image {
                 id: image
-                x: -root.document.canvasX * root.zoom
-                y: -root.document.canvasY * root.zoom
+                x: Math.round(-root.document.canvasX * root.zoom)
+                y: Math.round(-root.document.canvasY * root.zoom)
                 width: root.document.imageWidth * root.zoom
                 height: root.document.imageHeight * root.zoom
                 source: root.document.imageSource
@@ -521,13 +527,13 @@ ApplicationWindow {
         panEnabled: true
         onCursorChanged: root.cursor = cursor
         onPanned: (dx, dy) => {
-            flick.contentX = root.clamp(flick.contentX - dx, 0, flick.contentWidth - flick.width)
-            flick.contentY = root.clamp(flick.contentY - dy, 0, flick.contentHeight - flick.height)
+            flick.contentX = Math.round(root.clamp(flick.contentX - dx, 0, flick.contentWidth - flick.width))
+            flick.contentY = Math.round(root.clamp(flick.contentY - dy, 0, flick.contentHeight - flick.height))
         }
         onZoomRequested: (factor, x, y) => root.zoomAt(root.zoom * factor, x, y)
         onScrolled: (dx, dy) => {
-            flick.contentX = root.clamp(flick.contentX - dx, 0, flick.contentWidth - flick.width)
-            flick.contentY = root.clamp(flick.contentY - dy, 0, flick.contentHeight - flick.height)
+            flick.contentX = Math.round(root.clamp(flick.contentX - dx, 0, flick.contentWidth - flick.width))
+            flick.contentY = Math.round(root.clamp(flick.contentY - dy, 0, flick.contentHeight - flick.height))
         }
     }
 
@@ -656,8 +662,13 @@ ApplicationWindow {
 
     Dialog {
         id: discardDialog
+        objectName: "discardDialog"
         anchors.centerIn: parent
         modal: true
+        // A window of its own, titled and decorated by the desktop like
+        // the settings, rather than a panel drawn into the editor.
+        popupType: Popup.Window
+        padding: 16
         title: qsTr("Discard changes?")
         standardButtons: Dialog.Discard | Dialog.Cancel
         Label { text: qsTr("The changes to this screenshot are not saved.") }
