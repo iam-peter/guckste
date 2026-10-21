@@ -93,6 +93,12 @@ ApplicationWindow {
     onClosing: close => {
         if (!saved && !discardConfirmed && (temporary || !unchanged)) {
             close.accepted = false
+            // Closed from the taskbar the window may be behind others or
+            // minimized: it comes forward to ask.
+            if (visibility === Window.Minimized)
+                showNormal()
+            raise()
+            requestActivate()
             discardDialog.open()
         }
     }

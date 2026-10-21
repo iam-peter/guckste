@@ -270,6 +270,74 @@ private slots:
         QTRY_VERIFY(!window->isVisible());
     }
 
+    // A guide dragged out of the top ruler; a rectangle drawn near it
+    // snaps to it; the guide dragged back onto the ruler goes.
+    void guidesFromRulersSnap()
+    {
+        auto *document = new Document;
+        document->setImage(demoScreen(400, 300));
+        QQmlComponent component(m_engine);
+        component.loadFromModule("Guckste", "EditorWindow");
+        auto *window = qobject_cast<QQuickWindow *>(
+            component.createWithInitialProperties({{u"document"_s, QVariant::fromValue(document)}}));
+        QVERIFY2(window, qPrintable(component.errorString()));
+        document->setParent(window);
+        window->show();
+        QVERIFY(QTest::qWaitForWindowExposed(window));
+        window->setProperty("snapToGuides", true);
+        auto *area = window->findChild<QQuickItem *>(u"drawingArea"_s);
+        auto *ruler = window->findChild<QQuickItem *>(u"topRuler"_s);
+        QVERIFY(area && ruler);
+        const auto view = [&](qreal x, qreal y) {
+            QPointF p;
+            QMetaObject::invokeMethod(area, "toView", Q_RETURN_ARG(QPointF, p), Q_ARG(double, x), Q_ARG(double, y));
+            return area->mapToScene(p).toPoint();
+        };
+
+        // Out of the ruler, down to image row 100.
+        const QPoint onRuler = ruler->mapToScene(QPointF(100, 10)).toPoint();
+        const QPoint target(onRuler.x(), view(0, 100).y());
+        QTest::mousePress(window, Qt::LeftButton, Qt::NoModifier, onRuler);
+        QTest::mouseMove(window, (onRuler + target) / 2);
+        QTest::mouseMove(window, target);
+        QTest::mouseRelease(window, Qt::LeftButton, Qt::NoModifier, target);
+        QCOMPARE(document->guides().size(), 1);
+        QVariantMap guide = document->guides()[0].toMap();
+        QCOMPARE(guide[u"vertical"_s].toBool(), false);
+        QCOMPARE(guide[u"position"_s].toInt(), 100);
+
+        // A rectangle from (50, 40) to 4 px short of the guide ends on it.
+        window->setProperty("tool", int(Document::Rectangle));
+        QTest::mousePress(window, Qt::LeftButton, Qt::NoModifier, view(50, 40));
+        QTest::mouseMove(window, view(120, 70));
+        QTest::mouseMove(window, view(150, 96));
+        QTest::mouseRelease(window, Qt::LeftButton, Qt::NoModifier, view(150, 96));
+        QCOMPARE(document->annotationCount(), 1);
+        QCOMPARE(document->annotations()[0].rect(), QRectF(50, 40, 100, 60));
+
+        // Moved by its middle, its top edge catches the guide.
+        window->setProperty("tool", int(Document::Select));
+        QTest::mousePress(window, Qt::LeftButton, Qt::NoModifier, view(100, 70));
+        QTest::mouseMove(window, view(100, 100));
+        QTest::mouseMove(window, view(100, 127));
+        QTest::mouseRelease(window, Qt::LeftButton, Qt::NoModifier, view(100, 127));
+        QCOMPARE(document->annotations()[0].rect().top(), 100.0);
+
+        // Back onto the ruler: gone.
+        const QPoint onGuide(view(300, 100).x(), view(300, 100).y());
+        QTest::mousePress(window, Qt::LeftButton, Qt::NoModifier, onGuide);
+        QTest::mouseMove(window, onGuide - QPoint(0, 40));
+        QTest::mouseMove(window, QPoint(onGuide.x(), onRuler.y()));
+        QTest::mouseRelease(window, Qt::LeftButton, Qt::NoModifier, QPoint(onGuide.x(), onRuler.y()));
+        QVERIFY(document->guides().isEmpty());
+
+        QTest::qWait(50);
+        saveScreenshot(window, u"editor-guides"_s);
+        window->setProperty("discardConfirmed", true);
+        window->close();
+        QTRY_VERIFY(!window->isVisible());
+    }
+
     void overlayLoads()
     {
         auto *document = new Document;

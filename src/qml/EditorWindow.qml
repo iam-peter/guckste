@@ -30,6 +30,11 @@ ApplicationWindow {
     property point cursor: Qt.point(-1, -1)
     property bool discardConfirmed: false
     property bool showLayers: true
+    property bool snapToGuides: Preferences.snapToGuides
+    property bool exportGuides: Preferences.exportGuides
+    onSnapToGuidesChanged: Preferences.snapToGuides = snapToGuides
+    onExportGuidesChanged: Preferences.exportGuides = exportGuides
+    readonly property bool pointerInside: cursor.x !== -1 || cursor.y !== -1
     // The canvas as last laid out, to keep the view still when it grows.
     property rect shownCanvas: Qt.rect(document.canvasX, document.canvasY, document.canvasWidth, document.canvasHeight)
 
@@ -174,6 +179,12 @@ ApplicationWindow {
     onClosing: close => {
         if (document.modified && !discardConfirmed) {
             close.accepted = false
+            // Closed from the taskbar the window may be behind others or
+            // minimized: it comes forward to ask.
+            if (visibility === Window.Minimized)
+                showNormal()
+            raise()
+            requestActivate()
             discardDialog.open()
         }
     }
@@ -190,6 +201,13 @@ ApplicationWindow {
             if (document.canvasWidth * zoom > flick.width || document.canvasHeight * zoom > flick.height)
                 zoomToFit()
         })
+    }
+
+    // What is exported carries the guides when asked to.
+    Binding {
+        target: root.document
+        property: "exportGuides"
+        value: root.exportGuides
     }
 
     Connections {
@@ -329,10 +347,97 @@ ApplicationWindow {
         }
     }
 
+    // Rulers in image pixels. Dragging out of one makes a guide: from the
+    // top a horizontal one, from the left a vertical one.
+    component GuideRuler: Ruler {
+        id: ruler
+        background: Qt.darker(root.palette.window, 1.1)
+        foreground: root.palette.windowText
+        zoom: root.zoom
+
+        MouseArea {
+            id: rulerMouse
+            property int guide: -1
+            anchors.fill: parent
+            acceptedButtons: Qt.LeftButton | Qt.RightButton
+            cursorShape: ruler.vertical ? Qt.SplitHCursor : Qt.SplitVCursor
+
+            function position(x: real, y: real): real {
+                const p = mapToItem(marks, x, y)
+                const image = marks.toImage(p.x, p.y)
+                return ruler.vertical ? image.x : image.y
+            }
+
+            onPressed: mouse => {
+                if (mouse.button === Qt.RightButton) {
+                    guideMenu.popup()
+                    return
+                }
+                guide = root.document.addGuide(ruler.vertical, position(mouse.x, mouse.y))
+            }
+            onPositionChanged: mouse => {
+                if (guide >= 0)
+                    root.document.moveGuide(guide, position(mouse.x, mouse.y))
+            }
+            onReleased: mouse => {
+                if (guide < 0)
+                    return
+                // Let go over the ruler again: no guide after all.
+                const p = mapToItem(marks, mouse.x, mouse.y)
+                if (p.x < 0 || p.y < 0 || p.x > marks.width || p.y > marks.height)
+                    root.document.removeGuide(guide)
+                guide = -1
+            }
+        }
+    }
+
+    Menu {
+        id: guideMenu
+        MenuItem {
+            text: qsTr("Remove all guides")
+            enabled: root.document.guides.length > 0
+            onTriggered: root.document.clearGuides()
+        }
+    }
+
+    readonly property int rulerSize: 20
+
+    Rectangle {
+        // The corner where the rulers meet.
+        x: 0
+        y: 0
+        width: root.rulerSize
+        height: root.rulerSize
+        color: Qt.darker(root.palette.window, 1.1)
+    }
+    GuideRuler {
+        id: topRuler
+        objectName: "topRuler"
+        x: root.rulerSize
+        y: 0
+        width: flick.width
+        height: root.rulerSize
+        origin: marks.originX
+        pointer: root.pointerInside ? root.cursor.x : NaN
+    }
+    GuideRuler {
+        id: leftRuler
+        objectName: "leftRuler"
+        vertical: true
+        x: 0
+        y: root.rulerSize
+        width: root.rulerSize
+        height: flick.height
+        origin: marks.originY
+        pointer: root.pointerInside ? root.cursor.y : NaN
+    }
+
     Flickable {
         id: flick
         anchors.left: parent.left
+        anchors.leftMargin: root.rulerSize
         anchors.top: parent.top
+        anchors.topMargin: root.rulerSize
         anchors.bottom: parent.bottom
         anchors.right: root.showLayers ? layers.left : parent.right
         contentWidth: Math.max(width, root.document.canvasWidth * root.zoom)
@@ -411,6 +516,8 @@ ApplicationWindow {
         textSize: root.textSize
         showGrid: root.showGrid
         gridMinZoom: 8
+        showGuides: true
+        snapToGuides: root.snapToGuides
         panEnabled: true
         onCursorChanged: root.cursor = cursor
         onPanned: (dx, dy) => {
@@ -480,6 +587,22 @@ ApplicationWindow {
                 elide: Text.ElideRight
                 color: status.message !== "" ? Theme.accent : palette.placeholderText
                 text: status.message !== "" ? status.message : root.toolHint()
+            }
+            CheckBox {
+                text: qsTr("Snap to guides")
+                font.pixelSize: 12
+                checked: root.snapToGuides
+                onToggled: root.snapToGuides = checked
+                ToolTip.text: qsTr("Line up what is drawn, moved or resized with the guides dragged out of the rulers")
+                ToolTip.visible: hovered
+            }
+            CheckBox {
+                text: qsTr("Export guides")
+                font.pixelSize: 12
+                checked: root.exportGuides
+                onToggled: root.exportGuides = checked
+                ToolTip.text: qsTr("Draw the guides into copies and saved images")
+                ToolTip.visible: hovered
             }
             CheckBox {
                 text: qsTr("Export at %1 %").arg(Math.round(root.zoom * 100))

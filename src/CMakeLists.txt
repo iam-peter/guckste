@@ -63,6 +63,7 @@ qt_add_qml_module(guckste_ui
     VERSION 1.0
     SOURCES
         ui/AnnotationLayer.h ui/AnnotationLayer.cpp
+        ui/Ruler.h ui/Ruler.cpp
         ui/DocumentImageProvider.h ui/DocumentImageProvider.cpp
         ui/App.h ui/App.cpp
         ui/Clipboard.h

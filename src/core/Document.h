@@ -41,6 +41,12 @@ class Document : public QObject
     Q_PROPERTY(int canvasHeight READ canvasHeight NOTIFY canvasChanged)
     // Goes up with every change, for bindings that ask for derived data.
     Q_PROPERTY(int revision READ revision NOTIFY changed)
+    // Guides, dragged out of the editor's rulers: lines on pixel edges to
+    // line marks up with, as {vertical, position} in image pixels. Not
+    // part of the undo history, as in GIMP.
+    Q_PROPERTY(QVariantList guides READ guides NOTIFY guidesChanged)
+    // Copies and saves draw the guides in, 1 px wide.
+    Q_PROPERTY(bool exportGuides READ exportGuides WRITE setExportGuides NOTIFY exportGuidesChanged)
 
 public:
     // Mirrors Annotation::Type, with Select in front, for QML.
@@ -68,6 +74,16 @@ public:
     int canvasWidth() const { return m_canvas.width(); }
     int canvasHeight() const { return m_canvas.height(); }
     int revision() const { return m_revision; }
+    QVariantList guides() const;
+    bool exportGuides() const { return m_exportGuides; }
+    void setExportGuides(bool on);
+    Q_INVOKABLE int addGuide(bool vertical, qreal position);
+    Q_INVOKABLE void moveGuide(int index, qreal position);
+    Q_INVOKABLE void removeGuide(int index);
+    Q_INVOKABLE void clearGuides();
+    // What a mark lines up with guides by, in image pixels: its geometry
+    // for shapes and images, what is painted for texts and numbers.
+    Q_INVOKABLE QRectF snapBounds(int index, qreal scale) const;
 
     const QList<Annotation> &annotations() const { return m_annotations; }
     const Annotation *current() const { return m_current ? &*m_current : nullptr; }
@@ -153,6 +169,8 @@ signals:
     void imageChanged();
     void changed();
     void canvasChanged();
+    void guidesChanged();
+    void exportGuidesChanged();
     void selectedIndexChanged();
     void filePathChanged();
     void modifiedChanged();
@@ -181,4 +199,11 @@ private:
     int m_restyling = -1;
     QRect m_canvas;
     int m_revision = 0;
+    struct Guide
+    {
+        bool vertical = false;
+        int position = 0;
+    };
+    QList<Guide> m_guides;
+    bool m_exportGuides = false;
 };

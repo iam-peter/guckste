@@ -18,6 +18,8 @@ const auto kColor = "tools/color";
 const auto kSize = "tools/size";
 const auto kTextSize = "tools/textSize";
 const auto kShowGrid = "editor/showGrid";
+const auto kSnapToGuides = "editor/snapToGuides";
+const auto kExportGuides = "editor/exportGuides";
 const auto kFrameRate = "recording/frameRate";
 const auto kMicrophone = "recording/microphone";
 const auto kQuality = "recording/quality";
@@ -158,6 +160,32 @@ void Preferences::setTextSize(qreal size)
     if (qFuzzyCompare(size, textSize()))
         return;
     m_settings.setValue(kTextSize, size);
+    emit changed();
+}
+
+bool Preferences::snapToGuides() const
+{
+    return m_settings.value(kSnapToGuides, true).toBool();
+}
+
+void Preferences::setSnapToGuides(bool on)
+{
+    if (on == snapToGuides())
+        return;
+    m_settings.setValue(kSnapToGuides, on);
+    emit changed();
+}
+
+bool Preferences::exportGuides() const
+{
+    return m_settings.value(kExportGuides, false).toBool();
+}
+
+void Preferences::setExportGuides(bool on)
+{
+    if (on == exportGuides())
+        return;
+    m_settings.setValue(kExportGuides, on);
     emit changed();
 }
 

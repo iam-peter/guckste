@@ -165,6 +165,15 @@ keeping its shape from a corner unless Shift is held. The canvas grows to
 take in all of them, and what no image covers stays transparent in the
 export.
 
+Rulers along the top and left count image pixels and mark where the
+pointer is. Drag out of one to place a guide, as in GIMP: from the top a
+horizontal one, from the left a vertical one. With the select tool a
+guide can be dragged again, and dropped back on a ruler it goes;
+right-clicking a ruler removes them all. With "Snap to guides" in the
+status bar, what is drawn, moved or resized lines up with a guide once
+within a few pixels of it, edges and middles alike. "Export guides" draws
+them into copies and saved images, 1 px wide at any zoom.
+
 The layer panel on the right lists every mark and image, topmost first,
 above the screenshot: click one to select it, raise or lower it with the
 arrows, or remove it. Double-clicking a text there edits it too.

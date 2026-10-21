@@ -24,6 +24,10 @@ class Preferences : public QObject
     // A text's font size in pixels, apart from the stroke size.
     Q_PROPERTY(qreal textSize READ textSize WRITE setTextSize NOTIFY changed)
     Q_PROPERTY(bool showGrid READ showGrid WRITE setShowGrid NOTIFY changed)
+    // Drawn and moved marks snap to the editor's guides.
+    Q_PROPERTY(bool snapToGuides READ snapToGuides WRITE setSnapToGuides NOTIFY changed)
+    // The guides are drawn into copies and saved images.
+    Q_PROPERTY(bool exportGuides READ exportGuides WRITE setExportGuides NOTIFY changed)
     Q_PROPERTY(bool copyPathAfterSave READ copyPathAfterSave WRITE setCopyPathAfterSave NOTIFY changed)
     Q_PROPERTY(int frameRate READ frameRate WRITE setFrameRate NOTIFY changed)
     Q_PROPERTY(bool recordMicrophone READ recordMicrophone WRITE setRecordMicrophone NOTIFY changed)
@@ -53,6 +57,10 @@ public:
     qreal textSize() const;
     void setTextSize(qreal size);
     bool showGrid() const;
+    bool snapToGuides() const;
+    void setSnapToGuides(bool on);
+    bool exportGuides() const;
+    void setExportGuides(bool on);
     void setShowGrid(bool on);
     bool copyPathAfterSave() const;
     void setCopyPathAfterSave(bool on);

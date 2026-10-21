@@ -152,6 +152,8 @@ bool Document::load(const QString &path)
     m_redo.clear();
     m_current.reset();
     m_selected = -1;
+    m_guides.clear();
+    emit guidesChanged();
     setImage(image);
     m_filePath = QFileInfo(path).absoluteFilePath();
     emit filePathChanged();
@@ -659,8 +661,85 @@ QImage Document::render(qreal scale, const QRect &region) const
     out.fill(Qt::transparent);
     QPainter painter(&out);
     paintLayers(painter, scale, source.topLeft());
+    if (m_exportGuides && !m_guides.isEmpty()) {
+        // On the pixel edge, 1 px wide whatever the scale.
+        painter.setRenderHint(QPainter::Antialiasing, false);
+        painter.setPen(QPen(QColor(0x2d, 0x8c, 0xff), 1));
+        for (const Guide &guide : std::as_const(m_guides)) {
+            if (guide.vertical) {
+                const int x = qMin(size.width() - 1, qRound((guide.position - source.left()) * scale));
+                if (x >= 0)
+                    painter.drawLine(x, 0, x, size.height());
+            } else {
+                const int y = qMin(size.height() - 1, qRound((guide.position - source.top()) * scale));
+                if (y >= 0)
+                    painter.drawLine(0, y, size.width(), y);
+            }
+        }
+    }
     painter.end();
     return out;
+}
+
+QVariantList Document::guides() const
+{
+    QVariantList list;
+    for (const Guide &guide : m_guides)
+        list << QVariantMap{{QStringLiteral("vertical"), guide.vertical}, {QStringLiteral("position"), guide.position}};
+    return list;
+}
+
+void Document::setExportGuides(bool on)
+{
+    if (m_exportGuides == on)
+        return;
+    m_exportGuides = on;
+    emit exportGuidesChanged();
+}
+
+int Document::addGuide(bool vertical, qreal position)
+{
+    m_guides.append({vertical, int(qRound(position))});
+    setModified(true);
+    emit guidesChanged();
+    return m_guides.size() - 1;
+}
+
+void Document::moveGuide(int index, qreal position)
+{
+    if (index < 0 || index >= m_guides.size() || m_guides[index].position == qRound(position))
+        return;
+    m_guides[index].position = qRound(position);
+    setModified(true);
+    emit guidesChanged();
+}
+
+void Document::removeGuide(int index)
+{
+    if (index < 0 || index >= m_guides.size())
+        return;
+    m_guides.removeAt(index);
+    setModified(true);
+    emit guidesChanged();
+}
+
+void Document::clearGuides()
+{
+    if (m_guides.isEmpty())
+        return;
+    m_guides.clear();
+    setModified(true);
+    emit guidesChanged();
+}
+
+QRectF Document::snapBounds(int index, qreal scale) const
+{
+    if (index < 0 || index >= m_annotations.size())
+        return {};
+    const Annotation &a = m_annotations[index];
+    if (a.type == Annotation::Type::Text || a.type == Annotation::Type::Counter)
+        return annotationBounds(index, scale);
+    return a.geometryBounds();
 }
 
 void Document::paintLayers(QPainter &painter, qreal scale, const QPointF &origin, int upTo, bool withBase, int hidden,
@@ -744,6 +823,10 @@ void Document::crop(const QRectF &region)
     m_redo.clear();
     for (Annotation &a : m_annotations)
         a.translate(-rect.topLeft());
+    for (Guide &guide : m_guides)
+        guide.position -= guide.vertical ? rect.left() : rect.top();
+    if (!m_guides.isEmpty())
+        emit guidesChanged();
     setImage(m_image.copy(rect));
     emit changed();
 }

@@ -337,6 +337,42 @@ private slots:
         QCOMPARE(doc.annotationTool(0), int(Document::Ellipse));
     }
 
+    // Guides sit on whole pixels, move along with a crop, and are drawn
+    // into what is exported only when asked to.
+    void guidesExportOnRequest()
+    {
+        Document doc;
+        QImage white(40, 30, QImage::Format_ARGB32_Premultiplied);
+        white.fill(Qt::white);
+        doc.setImage(white);
+        QSignalSpy guidesChanged(&doc, &Document::guidesChanged);
+        QCOMPARE(doc.addGuide(true, 10.4), 0);
+        QCOMPARE(doc.addGuide(false, 20.6), 1);
+        QCOMPARE(guidesChanged.count(), 2);
+        QCOMPARE(doc.guides()[0].toMap()[u"position"_s].toInt(), 10);
+        QCOMPARE(doc.guides()[1].toMap()[u"position"_s].toInt(), 21);
+
+        QCOMPARE(doc.render(1).pixelColor(10, 5), QColor(Qt::white));
+        doc.setExportGuides(true);
+        const QImage at1 = doc.render(1);
+        QCOMPARE(at1.pixelColor(10, 5), QColor(0x2d, 0x8c, 0xff));
+        QCOMPARE(at1.pixelColor(5, 21), QColor(0x2d, 0x8c, 0xff));
+        QCOMPARE(at1.pixelColor(11, 5), QColor(Qt::white));
+        // Still 1 px wide when enlarged.
+        const QImage at4 = doc.render(4);
+        QCOMPARE(at4.pixelColor(40, 5), QColor(0x2d, 0x8c, 0xff));
+        QCOMPARE(at4.pixelColor(41, 5), QColor(Qt::white));
+
+        doc.moveGuide(0, 15);
+        doc.crop(QRectF(5, 5, 30, 20));
+        QCOMPARE(doc.guides()[0].toMap()[u"position"_s].toInt(), 10);
+        QCOMPARE(doc.guides()[1].toMap()[u"position"_s].toInt(), 16);
+        doc.removeGuide(0);
+        QCOMPARE(doc.guides().size(), 1);
+        doc.clearGuides();
+        QVERIFY(doc.guides().isEmpty());
+    }
+
     void cropsWithAnnotations()
     {
         Document doc;
