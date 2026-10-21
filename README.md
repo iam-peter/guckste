@@ -116,13 +116,23 @@ seen while that is on, so leave it off when typing a password.
 
 Stopping opens the recording in the video editor (the settings can send
 it straight to the screenshot folder instead). The same tools draw on
-the video, over its whole length, at the size they will have in the
-file. Space plays and pauses, `,` and `.` step a frame, `[` and `]` set
-the start and the end to keep, which the handles on the timeline do as
-well; click or drag the timeline to scrub. Save (Ctrl+S) writes the video
-to the screenshot folder with the marks on every frame and the trimmed
-parts left out, re-encoding it; with no marks and no trim the recording
-is moved there as it is. Closing without saving deletes the recording.
+the video, at the size they will have in the file. Space plays and
+pauses, `,` and `.` step a frame, `[` and `]` set the start and the end
+to keep, which the handles on the timeline do as well; click or drag the
+timeline to scrub.
+
+Each mark gets a lane under the timeline, as in a video editor: a bar
+for when it shows. A new mark starts at the playhead and lasts to the
+end; drag the bar's edges to set when it comes and goes, or the bar to
+move it in time. Click a lane to select its mark (going to where it
+shows if it is not there at the playhead), double-click to go to its
+start, and right-click to show or hide it from the playhead, show it the
+whole time, or remove it.
+
+Save (Ctrl+S) writes the video to the screenshot folder with each mark
+on the frames of its time and the trimmed parts left out, re-encoding
+it; with no marks and no trim the recording is moved there as it is.
+Closing without saving deletes the recording.
 `guckste open talk.mp4`, or Open in either editor, opens an existing
 video the same way; that file is left alone and the result is a new one.
 

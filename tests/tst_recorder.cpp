@@ -241,6 +241,62 @@ private slots:
         QVERIFY(!QFileInfo::exists(plain));
     }
 
+    // Marks timed on a recording show on their frames only: one in the
+    // first second, one from the second on.
+    void exportsTimedMarks()
+    {
+        QTemporaryDir dir;
+        const QString source = writeVideo(dir.path() + u"/source.mp4"_s, 60, Qt::blue);
+        QVERIFY(QFileInfo(source).size() > 0);
+        VideoExporter exporter;
+        QSignalSpy finished(&exporter, &VideoExporter::finished);
+        QSignalSpy failed(&exporter, &VideoExporter::failed);
+        VideoExporter::Job job;
+        job.source = source;
+        job.target = dir.path() + u"/out.mp4"_s;
+        Annotation early;
+        early.type = Annotation::Type::Marker;
+        early.points = {QPointF(0, 0), QPointF(160, 240)};
+        early.color = Qt::red;
+        early.endMs = 1000;
+        Annotation late = early;
+        late.points = {QPointF(160, 0), QPointF(320, 240)};
+        late.color = Qt::green;
+        late.startMs = 1000;
+        late.endMs = -1;
+        job.annotations = {early, late};
+        QVERIFY(exporter.start(job));
+        QTRY_VERIFY_WITH_TIMEOUT(finished.count() > 0 || failed.count() > 0, 30000);
+        QVERIFY2(failed.isEmpty(), failed.isEmpty() ? "" : qPrintable(failed.first().first().toString()));
+
+        // A frame from each half.
+        QMediaPlayer player;
+        QVideoSink sink;
+        player.setVideoSink(&sink);
+        QImage first, second;
+        connect(&sink, &QVideoSink::videoFrameChanged, this, [&](const QVideoFrame &f) {
+            if (!f.isValid())
+                return;
+            if (first.isNull() && f.startTime() < 500000)
+                first = f.toImage();
+            if (second.isNull() && f.startTime() > 1300000)
+                second = f.toImage();
+        });
+        player.setSource(QUrl::fromLocalFile(job.target));
+        player.play();
+        QTRY_VERIFY_WITH_TIMEOUT(!first.isNull() && !second.isNull(), 10000);
+        player.stop();
+        // Marker over blue: tinted red on the left early, green on the right late.
+        const auto tinted = [](const QImage &image, int x, bool red) {
+            const QColor c = image.pixelColor(x, 120);
+            return red ? c.red() > 70 : c.green() > 70;
+        };
+        QVERIFY(tinted(first, 80, true));
+        QVERIFY(!tinted(first, 240, false));
+        QVERIFY(!tinted(second, 80, true));
+        QVERIFY(tinted(second, 240, false));
+    }
+
     void paintsTheCursor()
     {
         CursorCapture::Cursor cursor;

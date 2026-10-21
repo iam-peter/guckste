@@ -168,10 +168,14 @@ void VideoExporter::onFrame(const QVideoFrame &frame)
     }
     QImage image = VideoFrames::toImage(frame).convertToFormat(QImage::Format_RGB32);
     if (!m_job.annotations.isEmpty()) {
+        // Each mark on the frames of its time, in the source's time.
         QPainter painter(&image);
         AnnotationPainter marks(painter, image, 1);
-        for (const Annotation &a : std::as_const(m_job.annotations))
-            marks.paint(a);
+        const qint64 atMs = at / 1000;
+        for (const Annotation &a : std::as_const(m_job.annotations)) {
+            if (a.shownAt(atMs))
+                marks.paint(a);
+        }
     }
     QVideoFrame out = VideoFrames::toNV12(image);
     out.setStartTime(at - m_startUs);

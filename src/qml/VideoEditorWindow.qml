@@ -118,6 +118,14 @@ ApplicationWindow {
         }
     }
 
+    // Marks show at their time on the recording, and new ones start at
+    // the playhead.
+    Binding {
+        target: root.document
+        property: "time"
+        value: player.position
+    }
+
     MediaPlayer {
         id: player
         objectName: "player"
@@ -225,6 +233,7 @@ ApplicationWindow {
             spacing: 4
 
             RowLayout {
+                Layout.fillWidth: true
                 spacing: 6
                 IconButton {
                     iconName: "skip-back"
@@ -252,6 +261,7 @@ ApplicationWindow {
 
                 Timeline {
                     id: timeline
+                    objectName: "timeline"
                     Layout.fillWidth: true
                     duration: root.duration
                     position: player.position
@@ -262,6 +272,20 @@ ApplicationWindow {
                     onTrimEndRequested: ms => root.trimEnd = ms
                 }
 
+            }
+
+            TimelineLanes {
+                id: lanes
+                objectName: "lanes"
+                Layout.fillWidth: true
+                document: root.document
+                timeline: timeline
+                trackX: timeline.x
+                position: player.position
+                trimStart: root.trimStart
+                trimEnd: root.trimEnd
+                onPicked: root.tool = Document.Select
+                onSeekRequested: ms => { player.pause(); player.position = ms }
             }
 
             RowLayout {
@@ -283,7 +307,7 @@ ApplicationWindow {
                     text: status.message !== "" ? status.message
                         : root.exporter.running ? qsTr("Writing the video…")
                         : root.unchanged ? qsTr("Draw on the video, or set a start and an end; Save keeps it as it is.")
-                        : qsTr("Save writes a new video with the marks on every frame.")
+                        : qsTr("Save writes a new video with each mark on the frames of its time; drag its bar below to set them.")
                 }
                 ProgressBar {
                     visible: root.exporter.running

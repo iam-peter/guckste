@@ -20,19 +20,6 @@ Pane {
 
     padding: 0
 
-    readonly property var icons: ({
-        [Document.Pen]: "pencil",
-        [Document.Line]: "slash",
-        [Document.Arrow]: "move-up-right",
-        [Document.Rectangle]: "square",
-        [Document.Ellipse]: "circle",
-        [Document.Marker]: "highlighter",
-        [Document.Text]: "type",
-        [Document.Pixelate]: "grid-2x2",
-        [Document.Counter]: "hash",
-        [Document.Measure]: "ruler",
-        [Document.Image]: "image",
-    })
 
     ColumnLayout {
         anchors.fill: parent
@@ -90,7 +77,7 @@ Pane {
                 contentItem: RowLayout {
                     spacing: 6
                     Icon {
-                        name: row.isBase ? "lock" : panel.icons[row.kind] ?? "square"
+                        name: row.isBase ? "lock" : Icons.forTool(row.kind)
                         color: row.palette.text
                         opacity: 0.8
                     }

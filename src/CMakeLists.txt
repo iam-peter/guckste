@@ -97,6 +97,7 @@ qt_add_qml_module(guckste_qml
         qml/DrawingArea.qml
         qml/LayerPanel.qml
         qml/Timeline.qml
+        qml/TimelineLanes.qml
         qml/AnnotationToolbar.qml
         qml/TextEntry.qml
         qml/Icons.qml

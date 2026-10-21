@@ -927,6 +927,88 @@ private slots:
         QTRY_VERIFY(!window->isVisible());
     }
 
+    // Each mark on a recording gets a lane: its bar's edges set when it
+    // shows, the bar moves it in time, and it shows only then.
+    void videoEditorLanesTimeMarks()
+    {
+        QTemporaryDir dir;
+        const QString clip = writeVideo(dir.path() + u"/clip.mp4"_s, 120, Qt::darkCyan);
+        QVERIFY(!clip.isEmpty());
+        auto *document = new Document;
+        auto *exporter = new VideoExporter;
+        QQmlComponent component(m_engine);
+        component.loadFromModule("Guckste", "VideoEditorWindow");
+        auto *window = qobject_cast<QQuickWindow *>(component.createWithInitialProperties(
+            {{u"document"_s, QVariant::fromValue(document)}, {u"sourcePath"_s, clip},
+             {u"exporter"_s, QVariant::fromValue(exporter)}}));
+        QVERIFY2(window, qPrintable(component.errorString()));
+        document->setParent(window);
+        exporter->setParent(window);
+        window->resize(1000, 700);
+        window->show();
+        QVERIFY(QTest::qWaitForWindowExposed(window));
+        auto *player = window->findChild<QMediaPlayer *>(u"player"_s);
+        auto *lanes = window->findChild<QQuickItem *>(u"lanes"_s);
+        auto *timeline = window->findChild<QQuickItem *>(u"timeline"_s);
+        QVERIFY(player && lanes && timeline);
+        QTRY_VERIFY_WITH_TIMEOUT(player->duration() > 3500, 5000);
+        QTRY_COMPARE(document->time(), 0);
+
+        document->beginAnnotation(Document::Rectangle, 20, 20, Qt::red, 3);
+        document->updateAnnotation(120, 100, false);
+        document->commitAnnotation();
+        document->addText(150, 40, u"Later"_s, Qt::yellow, 24);
+        QTRY_COMPARE(lanes->property("count").toInt(), 2);
+        // Laid out, so the bars are where they will be pressed.
+        QTest::qWait(100);
+        QCOMPARE(document->annotationStart(0), 0);
+        QCOMPARE(document->annotationEnd(0), -1);
+
+        // Lane rows are topmost first: the rectangle's is the second.
+        const auto at = [&](int ms, int row) {
+            qreal x = 0;
+            QMetaObject::invokeMethod(lanes, "msToX", Q_RETURN_ARG(qreal, x), Q_ARG(int, ms));
+            const qreal y = (row + 0.5) * lanes->property("laneHeight").toReal();
+            return lanes->mapToScene(QPointF(x, y)).toPoint();
+        };
+        const int duration = int(player->duration());
+
+        // The rectangle's out edge, dragged in to 1.5 s.
+        QTest::mousePress(window, Qt::LeftButton, Qt::NoModifier, at(duration, 1) - QPoint(2, 0));
+        QTest::mouseMove(window, at(2500, 1));
+        QTest::mouseMove(window, at(1500, 1));
+        QTest::mouseRelease(window, Qt::LeftButton, Qt::NoModifier, at(1500, 1));
+        QVERIFY2(std::abs(document->annotationEnd(0) - 1500) < 60, qPrintable(QString::number(document->annotationEnd(0))));
+        QCOMPARE(document->annotationStart(0), 0);
+        QCOMPARE(document->selectedIndex(), 0);
+
+        // At 2 s it is gone, the text is still there.
+        player->setPosition(2000);
+        QTRY_COMPARE(document->time(), 2000);
+        QVERIFY(!document->isShown(0));
+        QVERIFY(document->isShown(1));
+
+        // The rectangle's bar moved a second on by its middle: it keeps
+        // its length, and shows at 2 s again.
+        QTest::mousePress(window, Qt::LeftButton, Qt::NoModifier, at(750, 1));
+        QTest::mouseMove(window, at(1250, 1));
+        QTest::mouseMove(window, at(1750, 1));
+        QTest::mouseRelease(window, Qt::LeftButton, Qt::NoModifier, at(1750, 1));
+        QVERIFY2(std::abs(document->annotationStart(0) - 1000) < 60, qPrintable(QString::number(document->annotationStart(0))));
+        QVERIFY(std::abs((document->annotationEnd(0) - document->annotationStart(0)) - 1500) < 60);
+        QVERIFY(document->isShown(0));
+        QTest::qWait(50);
+        saveScreenshot(window, u"video-lanes"_s);
+
+        // Right-click: the whole time again.
+        document->setAnnotationTiming(0, 0, -1);
+        QVERIFY(document->isShown(0));
+
+        window->setProperty("discardConfirmed", true);
+        window->close();
+        QTRY_VERIFY(!window->isVisible());
+    }
+
     void videoEditorLoads()
     {
         auto *document = new Document;

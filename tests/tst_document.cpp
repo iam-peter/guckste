@@ -405,6 +405,55 @@ private slots:
         QVERIFY(doc.guides().isEmpty());
     }
 
+    // On a recording, a mark shows from its start until its end: left out
+    // of painting and hit tests otherwise, and new ones start at the time.
+    void marksShowAtTheirTime()
+    {
+        Document doc;
+        QImage white(40, 40, QImage::Format_ARGB32_Premultiplied);
+        white.fill(Qt::white);
+        doc.setImage(white);
+        QSignalSpy timeChanged(&doc, &Document::timeChanged);
+        doc.setTime(2000);
+        QCOMPARE(timeChanged.count(), 1);
+        doc.beginAnnotation(Document::Rectangle, 5, 5, Qt::red, 2);
+        doc.updateAnnotation(30, 30, false);
+        doc.commitAnnotation();
+        QCOMPARE(doc.annotationStart(0), 2000);
+        QCOMPARE(doc.annotationEnd(0), -1);
+        QVERIFY(doc.isShown(0));
+        QCOMPARE(doc.hitTest(5, 15, 1), 0);
+
+        doc.setTime(1000);
+        QVERIFY(!doc.isShown(0));
+        QCOMPARE(doc.hitTest(5, 15, 1), -1);
+        QVERIFY(doc.handlePoints(0).isEmpty());
+        QCOMPARE(doc.render(1).pixelColor(5, 15), QColor(Qt::white));
+
+        doc.setAnnotationTiming(0, 500, 1500);
+        QVERIFY(doc.isShown(0));
+        QCOMPARE(doc.render(1).pixelColor(5, 15), QColor(Qt::red));
+        doc.setTime(1500);
+        QVERIFY(!doc.isShown(0));
+        // An end before the start is refused.
+        doc.setAnnotationTiming(0, 800, 700);
+        QCOMPARE(doc.annotationStart(0), 500);
+
+        // A drag of the timing is one undo step.
+        doc.beginRetime(0);
+        doc.retime(600, 1600);
+        doc.retime(700, 1700);
+        doc.endRetime();
+        QCOMPARE(doc.annotationStart(0), 700);
+        doc.undo();
+        QCOMPARE(doc.annotationStart(0), 500);
+        QCOMPARE(doc.annotationEnd(0), 1500);
+
+        // A screenshot shows all of them.
+        doc.setTime(-1);
+        QVERIFY(doc.isShown(0));
+    }
+
     void cropsWithAnnotations()
     {
         Document doc;

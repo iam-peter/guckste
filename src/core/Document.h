@@ -45,6 +45,10 @@ class Document : public QObject
     // line marks up with, as {vertical, position} in image pixels. Not
     // part of the undo history, as in GIMP.
     Q_PROPERTY(QVariantList guides READ guides NOTIFY guidesChanged)
+    // The time of a recording the document is shown at, in ms, which
+    // leaves out the marks not shown then; -1, as for a screenshot, shows
+    // all of them. New marks start there.
+    Q_PROPERTY(int time READ time WRITE setTime NOTIFY timeChanged)
     // Copies and saves draw the guides in, 1 px wide.
     Q_PROPERTY(bool exportGuides READ exportGuides WRITE setExportGuides NOTIFY exportGuidesChanged)
 
@@ -74,6 +78,18 @@ public:
     int canvasWidth() const { return m_canvas.width(); }
     int canvasHeight() const { return m_canvas.height(); }
     int revision() const { return m_revision; }
+    int time() const { return m_time; }
+    void setTime(int ms);
+    // Whether a mark is shown at the document's time.
+    Q_INVOKABLE bool isShown(int index) const;
+    Q_INVOKABLE int annotationStart(int index) const;
+    Q_INVOKABLE int annotationEnd(int index) const;
+    // When a mark shows on a recording, as one undo step; end -1 is to the
+    // end. Dragging: one undo step from beginRetime() to endRetime().
+    Q_INVOKABLE void setAnnotationTiming(int index, int startMs, int endMs);
+    Q_INVOKABLE void beginRetime(int index);
+    Q_INVOKABLE void retime(int startMs, int endMs);
+    Q_INVOKABLE void endRetime();
     QVariantList guides() const;
     bool exportGuides() const { return m_exportGuides; }
     void setExportGuides(bool on);
@@ -170,6 +186,7 @@ signals:
     void changed();
     void canvasChanged();
     void guidesChanged();
+    void timeChanged();
     void exportGuidesChanged();
     void selectedIndexChanged();
     void filePathChanged();
@@ -206,4 +223,6 @@ private:
     };
     QList<Guide> m_guides;
     bool m_exportGuides = false;
+    int m_time = -1;
+    int m_retiming = -1;
 };

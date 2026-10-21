@@ -197,6 +197,7 @@ void Document::beginAnnotation(int tool, qreal x, qreal y, const QColor &color, 
         return;
     Annotation a;
     a.type = toType(tool);
+    a.startMs = qMax(0, m_time);
     a.color = color;
     a.size = size;
     QPointF p(x, y);
@@ -275,6 +276,7 @@ void Document::addText(qreal x, qreal y, const QString &text, const QColor &colo
         return;
     Annotation a;
     a.type = Annotation::Type::Text;
+    a.startMs = qMax(0, m_time);
     a.points = {QPointF(x, y)};
     a.text = text;
     a.color = color;
@@ -342,6 +344,8 @@ int Document::hitTest(qreal x, qreal y, qreal scale) const
     AnnotationPainter painter(dummy, none, scale);
     const QPointF p(x, y);
     for (int i = m_annotations.size() - 1; i >= 0; --i) {
+        if (!m_annotations[i].shownAt(m_time))
+            continue;
         const qreal margin = 4 / scale;
         if (painter.bounds(m_annotations[i]).adjusted(-margin, -margin, margin, margin).contains(p))
             return i;
@@ -442,6 +446,7 @@ int Document::addImage(const QImage &image, qreal x, qreal y)
     m_current.reset();
     Annotation a;
     a.type = Annotation::Type::Image;
+    a.startMs = qMax(0, m_time);
     a.image = image.convertToFormat(QImage::Format_ARGB32_Premultiplied);
     a.points = {QPointF(qRound(x), qRound(y)), QPointF(qRound(x) + image.width(), qRound(y) + image.height())};
     pushUndo();
@@ -491,7 +496,7 @@ bool Document::clipboardHasImage() const
 
 QVariantList Document::handlePoints(int index) const
 {
-    if (index < 0 || index >= m_annotations.size())
+    if (index < 0 || index >= m_annotations.size() || !m_annotations[index].shownAt(m_time))
         return {};
     const Annotation &a = m_annotations[index];
     QVariantList points;
@@ -681,6 +686,70 @@ QImage Document::render(qreal scale, const QRect &region) const
     return out;
 }
 
+void Document::setTime(int ms)
+{
+    if (m_time == ms)
+        return;
+    m_time = ms;
+    emit timeChanged();
+}
+
+bool Document::isShown(int index) const
+{
+    return index >= 0 && index < m_annotations.size() && m_annotations[index].shownAt(m_time);
+}
+
+int Document::annotationStart(int index) const
+{
+    return index >= 0 && index < m_annotations.size() ? m_annotations[index].startMs : 0;
+}
+
+int Document::annotationEnd(int index) const
+{
+    return index >= 0 && index < m_annotations.size() ? m_annotations[index].endMs : -1;
+}
+
+void Document::setAnnotationTiming(int index, int startMs, int endMs)
+{
+    if (index < 0 || index >= m_annotations.size())
+        return;
+    const Annotation &a = m_annotations[index];
+    startMs = qMax(0, startMs);
+    if (endMs >= 0 && endMs <= startMs)
+        return;
+    if (a.startMs == startMs && a.endMs == endMs)
+        return;
+    pushUndo();
+    m_annotations[index].startMs = startMs;
+    m_annotations[index].endMs = endMs;
+    emit changed();
+}
+
+void Document::beginRetime(int index)
+{
+    if (index < 0 || index >= m_annotations.size())
+        return;
+    pushUndo();
+    m_retiming = index;
+}
+
+void Document::retime(int startMs, int endMs)
+{
+    if (m_retiming < 0 || m_retiming >= m_annotations.size())
+        return;
+    startMs = qMax(0, startMs);
+    if (endMs >= 0 && endMs <= startMs)
+        return;
+    m_annotations[m_retiming].startMs = startMs;
+    m_annotations[m_retiming].endMs = endMs;
+    emit changed();
+}
+
+void Document::endRetime()
+{
+    m_retiming = -1;
+}
+
 QVariantList Document::guides() const
 {
     QVariantList list;
@@ -760,7 +829,7 @@ void Document::paintLayers(QPainter &painter, qreal scale, const QPointF &origin
         marks.paint(a);
     };
     for (int i = 0; i < count; ++i) {
-        if (i != hidden)
+        if (i != hidden && m_annotations[i].shownAt(m_time))
             paintOne(m_annotations[i], i);
     }
     if (withCurrent && m_current)

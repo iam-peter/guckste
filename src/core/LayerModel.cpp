@@ -16,6 +16,16 @@ LayerModel::LayerModel(QObject *parent)
 {
 }
 
+void LayerModel::setIncludeBase(bool include)
+{
+    if (m_includeBase == include)
+        return;
+    beginResetModel();
+    m_includeBase = include;
+    endResetModel();
+    emit includeBaseChanged();
+}
+
 void LayerModel::setDocument(Document *document)
 {
     if (m_document == document)
@@ -29,9 +39,11 @@ void LayerModel::setDocument(Document *document)
         m_kinds = kinds();
         m_labels.clear();
         m_colors.clear();
+        m_times.clear();
         for (const Annotation &a : m_document->annotations()) {
             m_labels << label(a);
             m_colors << a.color;
+            m_times << std::pair(a.startMs, a.endMs);
         }
         connect(m_document, &Document::changed, this, &LayerModel::refresh);
         connect(m_document, &Document::imageChanged, this, &LayerModel::refresh);
@@ -61,9 +73,11 @@ void LayerModel::refresh()
         m_kinds = now;
         m_labels.clear();
         m_colors.clear();
+        m_times.clear();
         for (const Annotation &a : annotations) {
             m_labels << label(a);
             m_colors << a.color;
+            m_times << std::pair(a.startMs, a.endMs);
         }
         endResetModel();
         return;
@@ -71,23 +85,27 @@ void LayerModel::refresh()
     const int count = annotations.size();
     for (int i = 0; i < count; ++i) {
         const QString text = label(annotations[i]);
-        if (text == m_labels[i] && annotations[i].color == m_colors[i])
+        const std::pair times(annotations[i].startMs, annotations[i].endMs);
+        if (text == m_labels[i] && annotations[i].color == m_colors[i] && times == m_times[i])
             continue;
         m_labels[i] = text;
         m_colors[i] = annotations[i].color;
+        m_times[i] = times;
         const QModelIndex row = index(count - 1 - i);
-        emit dataChanged(row, row, {LabelRole, ColorRole});
+        emit dataChanged(row, row, {LabelRole, ColorRole, StartRole, EndRole});
     }
     // The screenshot's size, after a crop or a new image.
-    const QModelIndex base = index(count);
-    emit dataChanged(base, base, {LabelRole});
+    if (m_includeBase) {
+        const QModelIndex base = index(count);
+        emit dataChanged(base, base, {LabelRole});
+    }
 }
 
 int LayerModel::rowCount(const QModelIndex &parent) const
 {
     if (parent.isValid() || !m_document)
         return 0;
-    return m_kinds.size() + 1;
+    return m_kinds.size() + (m_includeBase ? 1 : 0);
 }
 
 QVariant LayerModel::data(const QModelIndex &index, int role) const
@@ -110,6 +128,10 @@ QVariant LayerModel::data(const QModelIndex &index, int role) const
         return m_labels.value(annotation);
     case ColorRole:
         return base ? QColor() : m_colors.value(annotation);
+    case StartRole:
+        return base ? 0 : m_times.value(annotation).first;
+    case EndRole:
+        return base ? -1 : m_times.value(annotation, std::pair(0, -1)).second;
     case Qt::DisplayRole:
         return data(index, LabelRole);
     }
@@ -119,7 +141,8 @@ QVariant LayerModel::data(const QModelIndex &index, int role) const
 QHash<int, QByteArray> LayerModel::roleNames() const
 {
     return {{IndexRole, "layerIndex"}, {KindRole, "kind"}, {LabelRole, "label"},
-            {ColorRole, "layerColor"}, {IsBaseRole, "isBase"}};
+            {ColorRole, "layerColor"}, {IsBaseRole, "isBase"},
+            {StartRole, "startMs"}, {EndRole, "endMs"}};
 }
 
 QString LayerModel::label(const Annotation &a)

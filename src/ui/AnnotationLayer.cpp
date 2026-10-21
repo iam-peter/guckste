@@ -23,6 +23,7 @@ void AnnotationLayer::setDocument(Document *document)
     if (m_document) {
         connect(m_document, &Document::changed, this, [this] { update(); });
         connect(m_document, &Document::imageChanged, this, [this] { update(); });
+        connect(m_document, &Document::timeChanged, this, [this] { update(); });
         connect(m_document, &QObject::destroyed, this, [this] {
             m_document = nullptr;
             emit documentChanged();
@@ -140,7 +141,8 @@ void AnnotationLayer::paint(QPainter *painter)
     m_document->paintLayers(*painter, m_zoom, m_origin, -1, false, m_hiddenIndex, true);
     const QList<Annotation> &list = m_document->annotations();
     const int selected = m_document->selectedIndex();
-    if (m_showSelection && selected >= 0 && selected < list.size() && selected != m_hiddenIndex) {
+    if (m_showSelection && selected >= 0 && selected < list.size() && selected != m_hiddenIndex
+        && m_document->isShown(selected)) {
         AnnotationPainter frame(*painter, m_document->image(), m_zoom, m_origin);
         frame.paintSelection(list[selected]);
     }

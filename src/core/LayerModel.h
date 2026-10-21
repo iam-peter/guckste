@@ -15,6 +15,8 @@ class LayerModel : public QAbstractListModel
     Q_OBJECT
     QML_ELEMENT
     Q_PROPERTY(Document *document READ document WRITE setDocument NOTIFY documentChanged)
+    // The screenshot's row at the bottom; off for a recording's lanes.
+    Q_PROPERTY(bool includeBase READ includeBase WRITE setIncludeBase NOTIFY includeBaseChanged)
 
 public:
     enum Role {
@@ -25,12 +27,17 @@ public:
         LabelRole,
         ColorRole,
         IsBaseRole,
+        // When it shows on a recording, in ms; end -1 is to the end.
+        StartRole,
+        EndRole,
     };
 
     explicit LayerModel(QObject *parent = nullptr);
 
     Document *document() const { return m_document; }
     void setDocument(Document *document);
+    bool includeBase() const { return m_includeBase; }
+    void setIncludeBase(bool include);
 
     int rowCount(const QModelIndex &parent = {}) const override;
     QVariant data(const QModelIndex &index, int role) const override;
@@ -41,6 +48,7 @@ public:
 
 signals:
     void documentChanged();
+    void includeBaseChanged();
 
 private:
     void refresh();
@@ -51,4 +59,6 @@ private:
     QList<int> m_kinds;
     QList<QString> m_labels;
     QList<QColor> m_colors;
+    QList<std::pair<int, int>> m_times;
+    bool m_includeBase = true;
 };

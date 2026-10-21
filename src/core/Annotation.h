@@ -24,6 +24,11 @@ struct Annotation
     int number = 0;
     // An Image's pixels, drawn into the rectangle of its two points.
     QImage image;
+    // On a recording: shown from startMs until endMs, in the recording's
+    // own time; endMs -1 is to the end.
+    int startMs = 0;
+    int endMs = -1;
+    bool shownAt(qint64 ms) const { return ms < 0 || (ms >= startMs && (endMs < 0 || ms < endMs)); }
 
     // The normalized rectangle spanned by the first two points.
     QRectF rect() const;
