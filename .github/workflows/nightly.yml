@@ -77,7 +77,9 @@ jobs:
         if: failure()
         with:
           name: test-log-linux
-          path: build/Testing/Temporary/LastTest.log
+          path: |
+            build/Testing/Temporary/LastTest.log
+            build/test-reports/
           retention-days: 7
 
       - name: AppImage
@@ -93,7 +95,8 @@ jobs:
           ./linuxdeploy-x86_64.AppImage --appdir AppDir --executable build/src/guckste \
             --desktop-file src/logo/guckste.desktop --icon-file src/logo/guckste.svg \
             --plugin qt --output appimage
-          mv guckste-*.AppImage guckste-linux-x64.AppImage
+          # Named after the desktop file's Name
+          mv Guckste-*.AppImage guckste-linux-x64.AppImage
 
       # A version after the one in CMake, rising with the commit time, so
       # apt upgrades every nightly
@@ -144,7 +147,9 @@ jobs:
         if: failure()
         with:
           name: test-log-windows
-          path: build/Testing/Temporary/LastTest.log
+          path: |
+            build/Testing/Temporary/LastTest.log
+            build/test-reports/
           retention-days: 7
 
       - name: Package
@@ -193,7 +198,9 @@ jobs:
         if: failure()
         with:
           name: test-log-macos
-          path: build/Testing/Temporary/LastTest.log
+          path: |
+            build/Testing/Temporary/LastTest.log
+            build/test-reports/
           retention-days: 7
 
       - name: Disk image
