@@ -2,6 +2,7 @@
 // warning. Set GUCKSTE_SCREENSHOT_DIR to also save screenshots of them.
 
 #include "core/Document.h"
+#include "core/Preferences.h"
 #include "core/VideoExporter.h"
 #include "ui/App.h"
 #include "ui/DocumentImageProvider.h"
@@ -170,6 +171,46 @@ private slots:
         saveScreenshot(window, u"overlay"_s);
         window->close();
         QTRY_VERIFY(!window->isVisible());
+    }
+
+    // All screens and Previous are kept like the other modes and open with
+    // their region selected; switching the mode drops it again.
+    void pickModesAreKept()
+    {
+        Preferences *prefs = Preferences::instance();
+        const auto open = [this] {
+            auto *document = new Document;
+            document->setImage(demoScreen(1280, 800));
+            QQmlComponent component(m_engine);
+            component.loadFromModule("Guckste", "CaptureOverlay");
+            auto *window = qobject_cast<QQuickWindow *>(component.createWithInitialProperties(
+                {{u"document"_s, QVariant::fromValue(document)}, {u"screenGeometry"_s, QRect(0, 0, 1280, 800)}}));
+            if (window)
+                document->setParent(window);
+            return window;
+        };
+
+        prefs->setPickMode(u"all"_s);
+        QCOMPARE(prefs->pickMode(), u"all"_s);
+        QQuickWindow *window = open();
+        QVERIFY(window);
+        QCOMPARE(window->property("pickMode").toString(), u"all"_s);
+        QCOMPARE(window->property("selection").toRect(), QRect(0, 0, 1280, 800));
+        QMetaObject::invokeMethod(window, "setPickMode", Q_ARG(QString, u"window"_s));
+        QVERIFY(!window->property("hasSelection").toBool());
+        QCOMPARE(prefs->pickMode(), u"window"_s);
+        delete window;
+
+        prefs->setLastRegion(QRect(10, 20, 300, 200));
+        prefs->setPickMode(u"previous"_s);
+        QCOMPARE(prefs->pickMode(), u"previous"_s);
+        window = open();
+        QVERIFY(window);
+        QCOMPARE(window->property("pickMode").toString(), u"previous"_s);
+        QCOMPARE(window->property("selection").toRect(), QRect(10, 20, 300, 200));
+        delete window;
+
+        prefs->setPickMode(u"region"_s);
     }
 
     void recordingControlsLoad()

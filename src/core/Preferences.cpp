@@ -271,8 +271,10 @@ void Preferences::setLastRegion(const QRect &region)
 
 QString Preferences::pickMode() const
 {
-    const QString mode = m_settings.value(kPickMode, QStringLiteral("region")).toString();
-    return mode == QStringLiteral("screen") || mode == QStringLiteral("window") ? mode : QStringLiteral("region");
+    static const QStringList modes = {QStringLiteral("screen"), QStringLiteral("window"), QStringLiteral("region"),
+                                      QStringLiteral("all"), QStringLiteral("previous")};
+    const QString mode = m_settings.value(kPickMode).toString();
+    return modes.contains(mode) ? mode : QStringLiteral("region");
 }
 
 void Preferences::setPickMode(const QString &mode)

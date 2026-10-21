@@ -22,9 +22,9 @@ Window {
     // The screen the pointer was on when the overlay opened, in capture
     // coordinates: the mode bar goes there.
     property rect pointerScreen: Qt.rect(0, 0, 0, 0)
-    // How a click picks: "screen", "window", "region" or "all" (a drag
-    // always picks a region, whatever the mode). Kept between screenshots;
-    // "all" also selects every screen right away.
+    // How a click picks: "screen", "window", "region", "all" or "previous"
+    // (a drag always picks a region, whatever the mode). Kept between
+    // screenshots; "all" and "previous" select right away.
     property string pickMode: Preferences.pickMode
     onPickModeChanged: Preferences.pickMode = pickMode
     // A region to start with, in screen coordinates: after a timer.
@@ -84,6 +84,7 @@ Window {
     readonly property rect hoveredTarget: pickMode === "screen" ? hoveredScreen
                                         : pickMode === "window" ? hoveredWindow
                                         : pickMode === "all" && picking ? Qt.rect(0, 0, document.imageWidth, document.imageHeight)
+                                        : pickMode === "previous" && picking ? lastRegion
                                         : Qt.rect(0, 0, 0, 0)
 
     // The screen under the pointer, in image pixels, while picking.
@@ -200,6 +201,8 @@ Window {
         pickMode = mode
         if (mode === "all")
             takeAllScreens()
+        else if (mode === "previous")
+            takeLastRegion()
     }
 
     // The region captured again after the timer, in screen coordinates.
@@ -223,6 +226,10 @@ Window {
                          presetRegion.width * imageScale, presetRegion.height * imageScale)
         else if (pickMode === "all")
             takeAllScreens()
+        else if (pickMode === "previous" && lastRegion.width > 0)
+            takeLastRegion()
+        else if (pickMode === "previous")
+            pickMode = "region"
     }
 
     // A click with no drag takes what the mode highlighted.
@@ -344,15 +351,20 @@ Window {
         originY: root.selection.y
     }
 
+    // The region's frame, kept inside the window and thicker along its
+    // edges: a region reaching them, all screens or a whole screen, would
+    // otherwise have its frame off the screen.
     Rectangle {
+        readonly property rect s: root.selectionView
+        readonly property bool atEdge: s.x <= 0 || s.y <= 0 || s.x + s.width >= root.width || s.y + s.height >= root.height
         visible: root.hasSelection
-        x: root.selectionView.x - 1
-        y: root.selectionView.y - 1
-        width: root.selectionView.width + 2
-        height: root.selectionView.height + 2
+        x: Math.max(0, s.x - 1)
+        y: Math.max(0, s.y - 1)
+        width: Math.min(root.width, s.x + s.width + 1) - x
+        height: Math.min(root.height, s.y + s.height + 1) - y
         color: "transparent"
         border.color: Theme.selectionBorder
-        border.width: 1
+        border.width: atEdge ? 3 : 1
     }
 
     // The window or screen under the pointer: click to take it.
@@ -438,8 +450,8 @@ Window {
             readonly property real cy: index === 0 || index === 1 || index === 2 ? s.y
                                      : index === 3 || index === 7 ? s.y + s.height / 2 : s.y + s.height
             visible: root.hasSelection && root.tool === Document.Select && mouse.mode !== "select"
-            x: cx - width / 2
-            y: cy - height / 2
+            x: root.clamp(cx - width / 2, 0, root.width - width)
+            y: root.clamp(cy - height / 2, 0, root.height - height)
             width: 9
             height: 9
             color: "white"
@@ -673,6 +685,7 @@ Window {
                     { mode: "window", icon: "app-window", text: qsTr("Window"), tip: qsTr("Click a window (2)") },
                     { mode: "region", icon: "square-dashed", text: qsTr("Region"), tip: qsTr("Drag out a region (3)") },
                     { mode: "all", icon: "layout-grid", text: qsTr("All screens"), tip: qsTr("Take all screens at once (4)") },
+                    { mode: "previous", icon: "history", text: qsTr("Previous"), tip: qsTr("Take the region of last time (5)") },
                 ]
                 IconButton {
                     required property var modelData
@@ -681,15 +694,9 @@ Window {
                     tip: modelData.tip
                     checkable: true
                     checked: root.pickMode === modelData.mode
+                    enabled: modelData.mode !== "previous" || root.lastRegion.width > 0
                     onClicked: root.setPickMode(modelData.mode)
                 }
-            }
-            IconButton {
-                iconName: "history"
-                text: qsTr("Previous")
-                tip: root.lastRegion.width > 0 ? qsTr("Take the region of last time (5)") : qsTr("No region from last time")
-                enabled: root.lastRegion.width > 0
-                onClicked: root.takeLastRegion()
             }
         }
     }
@@ -795,7 +802,7 @@ Window {
     Shortcut { sequence: "2"; enabled: !textEntry.visible; onActivated: root.setPickMode("window") }
     Shortcut { sequence: "3"; enabled: !textEntry.visible; onActivated: root.setPickMode("region") }
     Shortcut { sequence: "4"; enabled: !textEntry.visible; onActivated: root.setPickMode("all") }
-    Shortcut { sequence: "5"; enabled: !textEntry.visible; onActivated: root.takeLastRegion() }
+    Shortcut { sequence: "5"; enabled: !textEntry.visible; onActivated: if (root.lastRegion.width > 0) root.setPickMode("previous") }
     Shortcut { sequence: "Left"; enabled: !textEntry.visible; onActivated: root.nudge(-1, 0) }
     Shortcut { sequence: "Right"; enabled: !textEntry.visible; onActivated: root.nudge(1, 0) }
     Shortcut { sequence: "Up"; enabled: !textEntry.visible; onActivated: root.nudge(0, -1) }
