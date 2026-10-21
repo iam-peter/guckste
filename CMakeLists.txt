@@ -16,6 +16,9 @@ if(UNIX AND NOT APPLE)
     find_package(X11 COMPONENTS Xfixes Xi Xext)
 endif()
 qt_standard_project_setup(REQUIRES 6.8)
+# Put the app and the tests in bin/ on every platform, not next to their
+# sources; Qt only does that on Windows, and there in the build root.
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 # An installed guckste finds the Qt it was built against.
 set(CMAKE_INSTALL_RPATH_USE_LINK_PATH ON)
 

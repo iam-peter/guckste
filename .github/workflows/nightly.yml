@@ -92,7 +92,7 @@ jobs:
           export QMAKE="$QT_ROOT_DIR/bin/qmake"
           export QML_SOURCES_PATHS="$GITHUB_WORKSPACE/src/qml"
           export LD_LIBRARY_PATH="$QT_ROOT_DIR/lib:$LD_LIBRARY_PATH"
-          ./linuxdeploy-x86_64.AppImage --appdir AppDir --executable build/src/guckste \
+          ./linuxdeploy-x86_64.AppImage --appdir AppDir --executable build/bin/guckste \
             --desktop-file src/logo/guckste.desktop --icon-file src/logo/guckste.svg \
             --plugin qt --output appimage
           # Named after the desktop file's Name
@@ -156,8 +156,7 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory guckste | Out-Null
-          # Qt puts all executables on Windows next to each other, not in src/
-          Copy-Item build/Release/guckste.exe guckste/
+          Copy-Item build/bin/Release/guckste.exe guckste/
           windeployqt --release --qmldir src/qml guckste/guckste.exe
           Compress-Archive -Path guckste -DestinationPath guckste-windows-x64.zip
 
@@ -205,8 +204,8 @@ jobs:
 
       - name: Disk image
         run: |
-          macdeployqt build/src/guckste.app -qmldir="$GITHUB_WORKSPACE/src/qml" -dmg
-          mv build/src/guckste.dmg guckste-macos.dmg
+          macdeployqt build/bin/guckste.app -qmldir="$GITHUB_WORKSPACE/src/qml" -dmg
+          mv build/bin/guckste.dmg guckste-macos.dmg
 
       - uses: actions/upload-artifact@v4
         with:

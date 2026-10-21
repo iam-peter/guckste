@@ -231,7 +231,7 @@ keys pressed.
 cmake -B build -G Ninja -DCMAKE_PREFIX_PATH=$HOME/Qt/6.12.0/gcc_64
 cmake --build build
 ctest --test-dir build --output-on-failure
-./build/src/guckste
+./build/bin/guckste
 ```
 
 `cmake --install build` also installs a desktop file with a launcher action
@@ -241,7 +241,7 @@ README and the site on a made-up desktop into the folder
 `GUCKSTE_SITE_SHOTS` names (`docs/screenshots`). `tst_recorder` records the
 screen for a few seconds to the file `GUCKSTE_LIVE_RECORD` names. To try a
 build next to the Guckste in use, give it its own instance name:
-`GUCKSTE_INSTANCE=dev ./build/src/guckste`.
+`GUCKSTE_INSTANCE=dev ./build/bin/guckste`.
 
 ## Layout
 
