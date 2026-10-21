@@ -35,9 +35,11 @@ Put `nightly` in place of `stable` for the nightly builds.
 ## Using it
 
 `guckste` starts in the tray. The tray menu takes a screenshot, captures
-all screens at once, opens an image in the editor, switches launching at
-login on and off, and opens the settings. Started again, `guckste` hands
-its command to the running instance:
+all screens at once, opens an image in the editor, records the screen,
+switches launching at login on and off, and opens the settings. There is
+one Guckste per user: it holds a lock file, and started again, `guckste`
+hands its command to the running instance and quits (`guckste --replace`
+quits the running one and takes its place, for a new build):
 
 - `guckste gui` — pick a region. Bind it to Print in your desktop's
   keyboard settings (XFCE: Settings → Keyboard → Application Shortcuts;
@@ -85,8 +87,10 @@ nothing has to be installed. The format is the first of MP4/H.264,
 WebM/VP9, WebM/VP8, MP4/MPEG-4, MKV/MPEG-4 and AVI/MJPEG that encodes on
 the machine, found out by encoding a few frames the first time: Qt's
 FFmpeg has H.264 only through VAAPI or NVENC hardware, and where that is
-missing the file is MP4 with MPEG-4 part 2. The frame rate and whether
-the microphone is recorded are in the settings.
+missing the file is MP4 with MPEG-4 part 2. Frames are handed to Qt as
+NV12, since from RGB frames Qt may pick a 12-bit format for NVENC that it
+refuses. The frame rate and whether the microphone is recorded are in
+the settings.
 
 On X11 the region may span screens (Qt captures the whole desktop there).
 Elsewhere it is clipped to the screen under its center.

@@ -2,6 +2,7 @@
 // and the cropping of frames.
 
 #include "core/ScreenRecorder.h"
+#include "core/SingleInstance.h"
 
 #include <QFileInfo>
 #include <QGuiApplication>
@@ -43,16 +44,30 @@ private slots:
 
         const QVideoFrame cropped = ScreenRecorder::cropped(frame, QRect(20, 10, 20, 10));
         QCOMPARE(cropped.size(), QSize(20, 10));
+        QCOMPARE(cropped.pixelFormat(), QVideoFrameFormat::Format_NV12);
         QCOMPARE(cropped.startTime(), 1000);
         QCOMPARE(cropped.endTime(), 2000);
+        // Back from YUV the colors are near, not exact.
+        auto near = [](const QColor &a, const QColor &b) {
+            return qAbs(a.red() - b.red()) < 8 && qAbs(a.green() - b.green()) < 8 && qAbs(a.blue() - b.blue()) < 8;
+        };
         const QImage out = cropped.toImage();
-        QCOMPARE(out.pixelColor(0, 0), QColor(Qt::red));
-        QCOMPARE(out.pixelColor(19, 9), QColor(Qt::red));
+        QVERIFY2(near(out.pixelColor(0, 0), Qt::red), qPrintable(out.pixelColor(0, 0).name()));
+        QVERIFY2(near(out.pixelColor(19, 9), Qt::red), qPrintable(out.pixelColor(19, 9).name()));
 
-        // Beyond the frame: clipped to it.
+        // Beyond the frame: clipped to it, and to even sizes.
         const QVideoFrame edge = ScreenRecorder::cropped(frame, QRect(50, 40, 30, 30));
         QCOMPARE(edge.size(), QSize(14, 8));
-        QCOMPARE(edge.toImage().pixelColor(0, 0), QColor(Qt::blue));
+        QVERIFY2(near(edge.toImage().pixelColor(0, 0), Qt::blue), qPrintable(edge.toImage().pixelColor(0, 0).name()));
+
+        // Grey stays grey, white and black keep their ends.
+        QImage grey(8, 8, QImage::Format_RGB32);
+        grey.fill(QColor(128, 128, 128));
+        QVERIFY(near(ScreenRecorder::toNV12(grey).toImage().pixelColor(3, 3), QColor(128, 128, 128)));
+        grey.fill(Qt::white);
+        QVERIFY(near(ScreenRecorder::toNV12(grey).toImage().pixelColor(3, 3), Qt::white));
+        grey.fill(Qt::black);
+        QVERIFY(near(ScreenRecorder::toNV12(grey).toImage().pixelColor(3, 3), Qt::black));
     }
 
     // A real recording of a screen region, when GUCKSTE_LIVE_RECORD names
@@ -84,6 +99,25 @@ private slots:
         QCOMPARE(finished.count(), 1);
         QVERIFY(QFileInfo(path).size() > 1000);
         qInfo("Recorded %lld ms to %s (%lld bytes)", recorder.duration(), qPrintable(path), QFileInfo(path).size());
+    }
+
+    void oneInstanceAtATime()
+    {
+        qputenv("GUCKSTE_INSTANCE", "test-" + QByteArray::number(QCoreApplication::applicationPid()));
+        QVERIFY(!SingleInstance::isRunning());
+        SingleInstance first;
+        QVERIFY(first.claim());
+        QVERIFY(first.claim());
+        QVERIFY(SingleInstance::isRunning());
+        SingleInstance second;
+        QVERIFY(!second.claim());
+        first.release();
+        QVERIFY(second.claim());
+        second.release();
+        QVERIFY(!SingleInstance::isRunning());
+        // Nobody to send to.
+        QVERIFY(!SingleInstance::sendToRunning(u"gui"_s, 300));
+        qunsetenv("GUCKSTE_INSTANCE");
     }
 
     void startsOnlyWithAScreen()

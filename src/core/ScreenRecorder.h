@@ -67,8 +67,13 @@ public:
     // Encodes a few frames with the format; false if that fails.
     static bool canEncode(const QMediaFormat &format);
     static QString suffixFor(const QMediaFormat &format);
-    // The frame cut down to `rect` (device pixels), times kept.
+    // The frame cut down to `rect` (device pixels) as NV12, times kept. NV12
+    // because of how Qt picks the encoder's format: from RGB frames it can
+    // land on a 12-bit format NVENC refuses for H.264, from NV12 it takes
+    // NV12, which every encoder has.
     static QVideoFrame cropped(const QVideoFrame &frame, const QRect &rect);
+    // An image as an NV12 frame, BT.601 video range.
+    static QVideoFrame toNV12(const QImage &image);
 
 signals:
     void stateChanged();

@@ -43,9 +43,12 @@ int main(int argc, char *argv[])
                        "  settings     Open the settings\n"
                        "  quit         Quit the running instance\n\n"
                        "Without a command, Guckste starts in the tray. A command goes to the\n"
-                       "running instance if there is one."));
+                       "running instance if there is one; there is never more than one."));
     parser.addHelpOption();
     parser.addVersionOption();
+    QCommandLineOption replace(QStringLiteral("replace"),
+                               QStringLiteral("Quit the running instance and take its place"));
+    parser.addOption(replace);
     parser.addPositionalArgument(QStringLiteral("command"), QStringLiteral("gui, full, open, record, settings or quit"));
     parser.addPositionalArgument(QStringLiteral("file"), QStringLiteral("Image to open"), QStringLiteral("[file]"));
     parser.process(app);
@@ -57,20 +60,33 @@ int main(int argc, char *argv[])
     else if (!command.isEmpty() && QFileInfo::exists(command) && arguments.size() == 1)
         command = QStringLiteral("open ") + QFileInfo(command).absoluteFilePath();
 
-    if (SingleInstance::sendToRunning(command.isEmpty() ? QStringLiteral("gui") : command)) {
-        if (command.isEmpty())
-            std::puts("Guckste is already running; taking a screenshot");
+    if (command == QStringLiteral("quit")) {
+        if (!SingleInstance::quitRunning())
+            std::fputs("Guckste did not quit\n", stderr);
         return 0;
     }
-    if (command == QStringLiteral("quit"))
-        return 0;
+    if (parser.isSet(replace) && !SingleInstance::quitRunning()) {
+        std::fputs("The running Guckste did not quit\n", stderr);
+        return 1;
+    }
+
+    // The lock decides who is the instance; everyone else hands over.
+    SingleInstance instance;
+    if (!instance.claim()) {
+        if (SingleInstance::sendToRunning(command.isEmpty() ? QStringLiteral("gui") : command)) {
+            if (command.isEmpty())
+                std::puts("Guckste is already running; taking a screenshot");
+            return 0;
+        }
+        std::fputs("Guckste is already running\n", stderr);
+        return 1;
+    }
 
     QQmlApplicationEngine engine;
     engine.addImageProvider(QStringLiteral("guckste"), new DocumentImageProvider);
     App guckste(&engine);
     guckste.setupTray();
 
-    SingleInstance instance;
     QObject::connect(&instance, &SingleInstance::commandReceived, &guckste, &App::handleCommand);
     instance.listen();
 
