@@ -22,6 +22,7 @@ ApplicationWindow {
     property int tool: Document.Select
     property color toolColor: Preferences.color
     property real size: Preferences.size
+    property real textSize: Preferences.textSize
     property bool showGrid: Preferences.showGrid
     // Export at the zoom on screen, or at the image's own size.
     property bool exportAtZoom: true
@@ -92,15 +93,25 @@ ApplicationWindow {
         })
     }
 
-    // The selected mark, if any, takes what the toolbar sets.
+    // The selected mark, if any, takes what the toolbar sets: with the
+    // select tool any mark, with the text tool a text.
     function restyleSelected(): int {
         if (marks.editingIndex >= 0)
             return marks.editingIndex
-        if (tool !== Document.Select)
-            return -1
         const index = document.selectedIndex
-        return index >= 0 && document.annotationTool(index) !== Document.Image ? index : -1
+        if (index < 0)
+            return -1
+        const kind = document.annotationTool(index)
+        if (tool === Document.Select)
+            return kind !== Document.Image ? index : -1
+        return tool === Document.Text && kind === Document.Text ? index : -1
     }
+
+    // The toolbar sets a text's pixel size instead of the stroke size.
+    readonly property bool textMode: document.revision >= 0
+                                     && (tool === Document.Text || marks.editingIndex >= 0
+                                         || (tool === Document.Select && document.selectedIndex >= 0
+                                             && document.annotationTool(document.selectedIndex) === Document.Text))
 
     function addFromClipboard() {
         if (document.pasteImage() < 0) {
@@ -120,6 +131,7 @@ ApplicationWindow {
     function rememberTools() {
         Preferences.color = toolColor
         Preferences.size = size
+        Preferences.textSize = textSize
     }
 
     function copy() {
@@ -189,17 +201,29 @@ ApplicationWindow {
             if (index < 0 || root.document.annotationTool(index) === Document.Image)
                 return
             root.toolColor = root.document.annotationColor(index)
-            root.size = root.document.annotationSize(index)
+            if (root.document.annotationTool(index) === Document.Text)
+                root.textSize = root.document.annotationSize(index)
+            else
+                root.size = root.document.annotationSize(index)
         }
     }
 
     header: AnnotationToolbar {
         id: toolbar
+        objectName: "toolbar"
         tool: root.tool
         color: root.toolColor
         size: root.size
+        textSize: root.textSize
+        textMode: root.textMode
         document: root.document
         onToolPicked: tool => root.pickTool(tool)
+        onTextSizePicked: size => {
+            root.textSize = size
+            const index = root.restyleSelected()
+            if (index >= 0 && root.document.annotationTool(index) === Document.Text)
+                root.document.setAnnotationSize(index, size)
+        }
         onColorPicked: picked => {
             root.toolColor = picked
             const index = root.restyleSelected()
@@ -384,6 +408,7 @@ ApplicationWindow {
         tool: root.tool
         toolColor: root.toolColor
         size: root.size
+        textSize: root.textSize
         showGrid: root.showGrid
         gridMinZoom: 8
         panEnabled: true

@@ -36,7 +36,7 @@ AnnotationPainter::AnnotationPainter(QPainter &painter, const QImage &base, qrea
 QFont AnnotationPainter::textFont(qreal size)
 {
     QFont font;
-    font.setPixelSize(qRound(10 + size * 2));
+    font.setPixelSize(qMax(1, qRound(size)));
     return font;
 }
 

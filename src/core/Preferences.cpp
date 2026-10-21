@@ -16,6 +16,7 @@ const auto kFilenamePattern = "capture/filenamePattern";
 const auto kCopyPath = "capture/copyPathAfterSave";
 const auto kColor = "tools/color";
 const auto kSize = "tools/size";
+const auto kTextSize = "tools/textSize";
 const auto kShowGrid = "editor/showGrid";
 const auto kFrameRate = "recording/frameRate";
 const auto kMicrophone = "recording/microphone";
@@ -144,6 +145,19 @@ void Preferences::setSize(qreal size)
     if (qFuzzyCompare(size, this->size()))
         return;
     m_settings.setValue(kSize, size);
+    emit changed();
+}
+
+qreal Preferences::textSize() const
+{
+    return m_settings.value(kTextSize, 20.0).toReal();
+}
+
+void Preferences::setTextSize(qreal size)
+{
+    if (qFuzzyCompare(size, textSize()))
+        return;
+    m_settings.setValue(kTextSize, size);
     emit changed();
 }
 

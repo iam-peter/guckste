@@ -25,6 +25,7 @@ ApplicationWindow {
     property int tool: Document.Select
     property color toolColor: Preferences.color
     property real size: Preferences.size
+    property real textSize: Preferences.textSize
     property int trimStart: 0
     property int trimEnd: -1
     property bool saved: false
@@ -145,10 +146,13 @@ ApplicationWindow {
         tool: root.tool
         color: root.toolColor
         size: root.size
+        textSize: root.textSize
+        textMode: root.tool === Document.Text
         document: root.document
         onToolPicked: tool => root.tool = tool
         onColorPicked: picked => root.toolColor = picked
         onSizePicked: size => root.size = size
+        onTextSizePicked: size => root.textSize = size
 
         IconButton { iconName: "save"; tip: qsTr("Save to the screenshot folder (Ctrl+S)"); enabled: !root.exporter.running; onClicked: root.save() }
         IconButton { iconName: "download"; tip: qsTr("Save as… (Ctrl+Shift+S)"); enabled: !root.exporter.running; onClicked: root.saveAs() }
@@ -184,6 +188,7 @@ ApplicationWindow {
                 tool: root.tool
                 toolColor: root.toolColor
                 size: root.size
+                textSize: root.textSize
             }
         }
     }

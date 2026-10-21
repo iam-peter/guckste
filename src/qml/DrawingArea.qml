@@ -20,6 +20,8 @@ Item {
     property int tool: Document.Select
     property color toolColor: "#ff3b30"
     property real size: 3
+    // A new text's font size in pixels.
+    property real textSize: 20
     property bool showGrid: false
     property real gridMinZoom: 8
     // Middle button or Space drag the view; Ctrl+wheel zooms, wheel scrolls.
@@ -262,16 +264,20 @@ Item {
     TextEntry {
         id: textEntry
         // An edited text keeps its own size and color.
-        pixelSize: 10 + (area.editingIndex >= 0 && area.document.revision >= 0
-                         ? area.document.annotationSize(area.editingIndex) : area.size) * 2
+        pixelSize: area.editingIndex >= 0 && area.document.revision >= 0
+                   ? area.document.annotationSize(area.editingIndex) : area.textSize
         color: area.editingIndex >= 0 && area.document.revision >= 0
                ? area.document.annotationColor(area.editingIndex) : area.toolColor
         onAccepted: text => {
             const index = area.editingIndex
             area.editingIndex = -1
-            if (index < 0)
-                area.document.addText(imagePoint.x, imagePoint.y, text, area.toolColor, area.size)
-            else if (text !== area.document.annotationText(index))
+            if (index < 0) {
+                const count = area.document.annotationCount
+                area.document.addText(imagePoint.x, imagePoint.y, text, area.toolColor, area.textSize)
+                // Selected, so the toolbar's color and size go to it.
+                if (area.document.annotationCount > count)
+                    area.document.selectedIndex = count
+            } else if (text !== area.document.annotationText(index))
                 area.document.setAnnotationText(index, text)
         }
         onCancelled: area.editingIndex = -1

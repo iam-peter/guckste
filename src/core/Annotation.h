@@ -19,6 +19,7 @@ struct Annotation
     Type type = Type::Pen;
     QList<QPointF> points;
     QColor color = QColor(255, 59, 48);
+    // The stroke width, or a text's font size, in output pixels.
     qreal size = 3;
     QString text;
     int number = 0;

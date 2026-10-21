@@ -111,7 +111,7 @@ private slots:
         document->beginAnnotation(Document::Arrow, 200, 200, Qt::yellow, 3);
         document->updateAnnotation(260, 150, false);
         document->commitAnnotation();
-        document->addText(50, 100, u"Guckste"_s, Qt::white, 4);
+        document->addText(50, 100, u"Guckste"_s, Qt::white, 24);
         QCOMPARE(document->annotationCount(), 3);
         QCOMPARE(window->property("exportScale").toReal(), 4.0);
         QTest::qWait(50);
@@ -170,7 +170,7 @@ private slots:
         QCOMPARE(document->annotations()[0].rect(), QRectF(440, 80, 400, 200));
 
         // A text, double-clicked and retyped in place, stays on its layer.
-        document->addText(40, 40, u"Old"_s, Qt::yellow, 4);
+        document->addText(40, 40, u"Old"_s, Qt::yellow, 20);
         QCOMPARE(document->annotationCount(), 2);
         QTest::qWait(30);
         const QPoint text = view(50, 50);
@@ -196,6 +196,75 @@ private slots:
         QCOMPARE(document->render(1).size(), QSize(840, 300));
         QTest::qWait(50);
         saveScreenshot(window, u"editor-layers"_s);
+        window->setProperty("discardConfirmed", true);
+        window->close();
+        QTRY_VERIFY(!window->isVisible());
+    }
+
+    // A text opened for editing shows where it was drawn, and the toolbar
+    // sets its size in pixels.
+    void textKeepsItsPlaceAndSize()
+    {
+        auto *document = new Document;
+        QImage black(400, 300, QImage::Format_ARGB32_Premultiplied);
+        black.fill(Qt::black);
+        document->setImage(black);
+        QQmlComponent component(m_engine);
+        component.loadFromModule("Guckste", "EditorWindow");
+        auto *window = qobject_cast<QQuickWindow *>(
+            component.createWithInitialProperties({{u"document"_s, QVariant::fromValue(document)}}));
+        QVERIFY2(window, qPrintable(component.errorString()));
+        document->setParent(window);
+        window->show();
+        QVERIFY(QTest::qWaitForWindowExposed(window));
+        auto *area = window->findChild<QQuickItem *>(u"drawingArea"_s);
+        auto *toolbar = window->findChild<QQuickItem *>(u"toolbar"_s);
+        QVERIFY(area && toolbar);
+
+        document->addText(40, 40, u"Hgjy"_s, QColor(255, 255, 0), 24);
+        QTest::qWait(50);
+        QPointF v;
+        QMetaObject::invokeMethod(area, "toView", Q_RETURN_ARG(QPointF, v), Q_ARG(double, 40), Q_ARG(double, 40));
+        const QPoint at = area->mapToScene(v).toPoint();
+        const QRect zone(at.x() - 20, at.y() - 20, 120, 60);
+        // The H's stem: the leftmost yellow column and its top.
+        const auto stem = [&](const QImage &image) {
+            for (int x = zone.left(); x <= zone.right(); ++x)
+                for (int y = zone.top(); y <= zone.bottom(); ++y) {
+                    const QColor c = image.pixelColor(x, y);
+                    if (c.red() > 200 && c.green() > 200 && c.blue() < 90)
+                        return QPoint(x, y);
+                }
+            return QPoint();
+        };
+        const QPoint drawn = stem(window->grabWindow());
+        QVERIFY(!drawn.isNull());
+        QMetaObject::invokeMethod(area, "editText", Q_ARG(int, 0));
+        QTRY_VERIFY(area->property("editingText").toBool());
+        QTest::qWait(50);
+        const QPoint editing = stem(window->grabWindow());
+        QVERIFY2(std::abs(editing.x() - drawn.x()) <= 1 && std::abs(editing.y() - drawn.y()) <= 1,
+                 qPrintable(u"drawn at %1,%2, edited at %3,%4"_s.arg(drawn.x()).arg(drawn.y())
+                                .arg(editing.x()).arg(editing.y())));
+        QVERIFY(window->property("textMode").toBool());
+        QMetaObject::invokeMethod(area, "cancelText");
+        QTRY_VERIFY(!area->property("editingText").toBool());
+
+        // Selected, the text shows its size and takes a new one.
+        document->setSelectedIndex(0);
+        QVERIFY(window->property("textMode").toBool());
+        QCOMPARE(window->property("textSize").toReal(), 24.0);
+        QMetaObject::invokeMethod(toolbar, "textSizePicked", Q_ARG(double, 40.0));
+        QCOMPARE(document->annotationSize(0), 40.0);
+        QCOMPARE(window->property("textSize").toReal(), 40.0);
+
+        // A rectangle selected takes the stroke size again.
+        document->beginAnnotation(Document::Rectangle, 100, 100, Qt::red, 3);
+        document->updateAnnotation(150, 150, false);
+        document->commitAnnotation();
+        document->setSelectedIndex(1);
+        QVERIFY(!window->property("textMode").toBool());
+
         window->setProperty("discardConfirmed", true);
         window->close();
         QTRY_VERIFY(!window->isVisible());

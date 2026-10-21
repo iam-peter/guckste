@@ -67,9 +67,15 @@ Pane {
 
                 readonly property bool current: !isBase && layerIndex === panel.document.selectedIndex
                 readonly property int count: panel.document.annotationCount
+                // Shown on the row under the pointer and the selected one.
+                // They always take their room, so nothing moves when they
+                // show.
+                readonly property bool showButtons: hovered || current
 
                 width: ListView.view.width
                 height: 32
+                topPadding: 5
+                bottomPadding: 5
                 highlighted: current
                 hoverEnabled: true
                 focusPolicy: Qt.NoFocus
@@ -89,7 +95,8 @@ Pane {
                         opacity: 0.8
                     }
                     Rectangle {
-                        visible: !row.isBase && row.kind !== Document.Image
+                        visible: !row.isBase
+                        opacity: row.kind !== Document.Image ? 1 : 0
                         implicitWidth: 10
                         implicitHeight: 10
                         radius: 5
@@ -105,29 +112,36 @@ Pane {
                     }
                     // Up the list is up the stack.
                     IconButton {
-                        visible: !row.isBase && (row.hovered || row.current)
+                        visible: !row.isBase
+                        opacity: row.showButtons ? 1 : 0
                         iconName: "chevron-up"
                         tip: qsTr("Raise")
-                        enabled: row.layerIndex < row.count - 1
-                        implicitWidth: 24
-                        implicitHeight: 24
+                        enabled: row.showButtons && row.layerIndex < row.count - 1
+                        implicitWidth: 22
+                        implicitHeight: 22
+                        padding: 3
                         onClicked: panel.document.moveLayer(row.layerIndex, row.layerIndex + 1)
                     }
                     IconButton {
-                        visible: !row.isBase && (row.hovered || row.current)
+                        visible: !row.isBase
+                        opacity: row.showButtons ? 1 : 0
                         iconName: "chevron-down"
                         tip: qsTr("Lower")
-                        enabled: row.layerIndex > 0
-                        implicitWidth: 24
-                        implicitHeight: 24
+                        enabled: row.showButtons && row.layerIndex > 0
+                        implicitWidth: 22
+                        implicitHeight: 22
+                        padding: 3
                         onClicked: panel.document.moveLayer(row.layerIndex, row.layerIndex - 1)
                     }
                     IconButton {
-                        visible: !row.isBase && (row.hovered || row.current)
+                        visible: !row.isBase
+                        opacity: row.showButtons ? 1 : 0
                         iconName: "trash-2"
                         tip: qsTr("Remove (Delete)")
-                        implicitWidth: 24
-                        implicitHeight: 24
+                        enabled: row.showButtons
+                        implicitWidth: 22
+                        implicitHeight: 22
+                        padding: 3
                         onClicked: panel.document.removeAnnotation(row.layerIndex)
                     }
                 }

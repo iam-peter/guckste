@@ -130,6 +130,7 @@ Window {
     property int tool: Document.Select
     property color toolColor: Preferences.color
     property real size: Preferences.size
+    property real textSize: Preferences.textSize
     property point cursor: Qt.point(-1, -1)
 
     function toImage(x: real, y: real): point {
@@ -201,6 +202,7 @@ Window {
     function rememberTools() {
         Preferences.color = toolColor
         Preferences.size = size
+        Preferences.textSize = textSize
         if (hasSelection)
             Preferences.lastRegion = Qt.rect(Math.round(screenGeometry.x + selection.x / imageScale),
                                              Math.round(screenGeometry.y + selection.y / imageScale),
@@ -332,6 +334,7 @@ Window {
     function cancel() {
         Preferences.color = toolColor
         Preferences.size = size
+        Preferences.textSize = textSize
         root.close()
     }
 
@@ -743,9 +746,9 @@ Window {
 
     TextEntry {
         id: textEntry
-        pixelSize: 10 + root.size * 2
+        pixelSize: root.textSize
         color: root.toolColor
-        onAccepted: text => root.document.addText(imagePoint.x, imagePoint.y, text, root.toolColor, root.size)
+        onAccepted: text => root.document.addText(imagePoint.x, imagePoint.y, text, root.toolColor, root.textSize)
     }
 
     AnnotationToolbar {
@@ -755,10 +758,13 @@ Window {
         tool: root.tool
         color: root.toolColor
         size: root.size
+        textSize: root.textSize
+        textMode: root.tool === Document.Text
         document: root.document
         onToolPicked: tool => root.tool = tool
         onColorPicked: picked => root.toolColor = picked
         onSizePicked: size => root.size = size
+        onTextSizePicked: size => root.textSize = size
         x: root.clamp(root.selectionView.x + root.selectionView.width / 2 - width / 2, 4, root.width - width - 4)
         y: {
             const s = root.selectionView

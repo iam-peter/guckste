@@ -73,8 +73,9 @@ appears under it:
 - Tools: select (V), pen (P), line (L), arrow (A), rectangle (R), ellipse
   (O), marker (M), text (T), pixelate (X), numbered marker (N), measure (D).
   Shift snaps lines to 45° and keeps rectangles square.
-- Ten colors and any other, and a size slider for strokes, text and
-  markers.
+- Ten colors and any other, and a size slider for strokes and markers.
+  With the text tool, or a text selected, it becomes the text's size in
+  pixels, to type in or step through.
 - Undo and redo (Ctrl+Z, Ctrl+Shift+Z). With the select tool, click a mark
   to move it; Delete removes it. Right-click drops the mark being drawn,
   then the selection of a mark, then the region, then the overlay.

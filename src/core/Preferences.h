@@ -21,6 +21,8 @@ class Preferences : public QObject
     Q_PROPERTY(bool launchAtLoginSupported READ launchAtLoginSupported CONSTANT)
     Q_PROPERTY(QColor color READ color WRITE setColor NOTIFY changed)
     Q_PROPERTY(qreal size READ size WRITE setSize NOTIFY changed)
+    // A text's font size in pixels, apart from the stroke size.
+    Q_PROPERTY(qreal textSize READ textSize WRITE setTextSize NOTIFY changed)
     Q_PROPERTY(bool showGrid READ showGrid WRITE setShowGrid NOTIFY changed)
     Q_PROPERTY(bool copyPathAfterSave READ copyPathAfterSave WRITE setCopyPathAfterSave NOTIFY changed)
     Q_PROPERTY(int frameRate READ frameRate WRITE setFrameRate NOTIFY changed)
@@ -48,6 +50,8 @@ public:
     void setColor(const QColor &color);
     qreal size() const;
     void setSize(qreal size);
+    qreal textSize() const;
+    void setTextSize(qreal size);
     bool showGrid() const;
     void setShowGrid(bool on);
     bool copyPathAfterSave() const;

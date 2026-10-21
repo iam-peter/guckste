@@ -15,6 +15,10 @@ ToolBar {
     property int tool: Document.Select
     property color color: "#ff3b30"
     property real size: 3
+    // A text's font size in pixels, set instead of the stroke size while
+    // `textMode` is on: with the text tool, or a text selected.
+    property real textSize: 20
+    property bool textMode: false
     property Document document
     // The overlay's floating look: a dark panel with light icons.
     property bool dark: false
@@ -51,6 +55,7 @@ ToolBar {
     signal toolPicked(int tool)
     signal colorPicked(color color)
     signal sizePicked(real size)
+    signal textSizePicked(real size)
 
     readonly property var tools: [
         { tool: Document.Select, icon: "mouse-pointer-2", tip: qsTr("Select and move (V)") },
@@ -153,6 +158,7 @@ ToolBar {
         ToolSeparator {}
 
         Rectangle {
+            visible: !bar.textMode
             Layout.preferredWidth: 20
             Layout.preferredHeight: 20
             color: "transparent"
@@ -166,8 +172,24 @@ ToolBar {
                 border.width: 1
             }
         }
+        SpinBox {
+            id: textSizeBox
+            visible: bar.textMode
+            Layout.preferredWidth: 110
+            from: 4
+            to: 400
+            editable: true
+            value: Math.round(bar.textSize)
+            textFromValue: (value, locale) => qsTr("%1 px").arg(value)
+            valueFromText: (text, locale) => parseInt(text) || value
+            onValueModified: bar.textSizePicked(value)
+            ToolTip.text: qsTr("Text size in pixels")
+            ToolTip.visible: hovered
+            ToolTip.delay: 600
+        }
         Slider {
             id: sizeSlider
+            visible: !bar.textMode
             Layout.preferredWidth: 90
             from: 1
             to: 20

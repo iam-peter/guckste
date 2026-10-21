@@ -32,6 +32,7 @@ public:
     QRectF map(const QRectF &r) const { return QRectF(map(r.topLeft()), r.size() * m_scale); }
     QPointF unmap(const QPointF &p) const { return p / m_scale + m_origin; }
 
+    // A text's font: `size` is its pixel size.
     static QFont textFont(qreal size);
     static qreal counterRadius(qreal size);
     static QString measureLabel(const Annotation &annotation);

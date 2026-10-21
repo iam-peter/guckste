@@ -60,7 +60,13 @@ Item {
         x: 4
         y: 4
         width: Math.max(72, contentWidth + 8)
+        // All of it, or the style's extra left padding moves the text
+        // off where it is drawn once accepted.
         padding: 0
+        leftPadding: 0
+        rightPadding: 0
+        topPadding: 0
+        bottomPadding: 0
         font.pixelSize: entry.pixelSize
         color: entry.color
         placeholderText: qsTr("Text")
