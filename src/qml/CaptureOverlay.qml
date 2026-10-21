@@ -22,6 +22,25 @@ Window {
     // The screen the pointer was on when the overlay opened, in capture
     // coordinates: the mode bar goes there.
     property rect pointerScreen: Qt.rect(0, 0, 0, 0)
+    // The screen the pointer is on now, in window coordinates: the mode bar
+    // follows it from screen to screen.
+    property rect barScreen: pointerScreen
+    onCursorChanged: {
+        if (cursor.x < 0)
+            return
+        const gx = cursor.x / imageScale + screenGeometry.x
+        const gy = cursor.y / imageScale + screenGeometry.y
+        const screens = Qt.application.screens
+        for (let i = 0; i < screens.length; ++i) {
+            const s = screens[i]
+            if (gx < s.virtualX || gx >= s.virtualX + s.width || gy < s.virtualY || gy >= s.virtualY + s.height)
+                continue
+            const x = s.virtualX - screenGeometry.x, y = s.virtualY - screenGeometry.y
+            if (x !== barScreen.x || y !== barScreen.y || s.width !== barScreen.width || s.height !== barScreen.height)
+                barScreen = Qt.rect(x, y, s.width, s.height)
+            return
+        }
+    }
     // How a click picks: "screen", "window", "region", "all" or "previous"
     // (a drag always picks a region, whatever the mode). Kept between
     // screenshots; "all" and "previous" select right away.
@@ -653,10 +672,11 @@ Window {
         onExited: root.cursor = Qt.point(-1, -1)
     }
 
-    // Screen, window, region, or last time's region, on the pointer's screen.
+    // Screen, window, region, all screens or last time's region, on the
+    // screen the pointer is on.
     Rectangle {
         id: modeBar
-        readonly property rect home: root.pointerScreen.width > 0 ? root.pointerScreen : Qt.rect(0, 0, root.width, root.height)
+        readonly property rect home: root.barScreen.width > 0 ? root.barScreen : Qt.rect(0, 0, root.width, root.height)
         x: home.x + home.width / 2 - width / 2
         y: home.y + 12
         width: modeRow.implicitWidth + 12
