@@ -20,6 +20,34 @@ ToolBar {
     property bool dark: false
     default property alias actions: actionsRow.data
 
+    // The last color from the picker that is not in the palette.
+    property color customColor: "transparent"
+    function noteCustomColor() {
+        if (!Theme.palette.some(c => Qt.colorEqual(c, color)))
+            customColor = color
+    }
+    onColorChanged: noteCustomColor()
+    Component.onCompleted: noteCustomColor()
+
+    component Swatch: Rectangle {
+        id: swatch
+        property color swatchColor
+        readonly property bool current: Qt.colorEqual(bar.color, swatchColor)
+        property alias hover: hoverHandler
+        width: 18
+        height: 18
+        radius: 9
+        color: swatchColor
+        border.color: current ? Theme.accent : (bar.dark ? "#80ffffff" : "#80000000")
+        border.width: current ? 2 : 1
+        HoverHandler { id: hoverHandler; cursorShape: Qt.PointingHandCursor }
+        // Takes the press, so it does not fall through the bar.
+        TapHandler {
+            gesturePolicy: TapHandler.ReleaseWithinBounds
+            onTapped: bar.colorPicked(swatch.swatchColor)
+        }
+    }
+
     signal toolPicked(int tool)
     signal colorPicked(color color)
     signal sizePicked(real size)
@@ -84,23 +112,18 @@ ToolBar {
 
         Repeater {
             model: Theme.palette
-            Rectangle {
-                id: swatch
+            Swatch {
                 required property color modelData
-                readonly property bool current: Qt.colorEqual(bar.color, modelData)
-                width: 18
-                height: 18
-                radius: 9
-                color: modelData
-                border.color: current ? Theme.accent : (bar.dark ? "#80ffffff" : "#80000000")
-                border.width: current ? 2 : 1
-                HoverHandler { cursorShape: Qt.PointingHandCursor }
-                // Takes the press, so it does not fall through the bar.
-                TapHandler {
-                    gesturePolicy: TapHandler.ReleaseWithinBounds
-                    onTapped: bar.colorPicked(swatch.modelData)
-                }
+                swatchColor: modelData
             }
+        }
+        // The color from the picker, until a palette color is taken.
+        Swatch {
+            swatchColor: bar.customColor
+            visible: bar.customColor.a > 0
+            ToolTip.text: qsTr("Your color %1").arg(bar.customColor.toString())
+            ToolTip.visible: hover.hovered
+            ToolTip.delay: 600
         }
         IconButton {
             id: paletteButton
