@@ -147,6 +147,40 @@ private slots:
         qunsetenv("GUCKSTE_INSTANCE");
     }
 
+    // Black and white stripes, 4 px wide, for blurring to show.
+    static QString writeStripes(const QString &path, int frames)
+    {
+        QMediaCaptureSession session;
+        QVideoFrameInput input;
+        QMediaRecorder recorder;
+        session.setVideoFrameInput(&input);
+        session.setRecorder(&recorder);
+        QMediaFormat format = Encoding::bestFormat();
+        format.setAudioCodec(QMediaFormat::AudioCodec::Unspecified);
+        recorder.setMediaFormat(format);
+        recorder.setVideoFrameRate(30);
+        recorder.setVideoResolution(QSize(320, 240));
+        recorder.setQuality(QMediaRecorder::VeryHighQuality);
+        recorder.setOutputLocation(QUrl::fromLocalFile(path));
+        recorder.record();
+        QImage image(320, 240, QImage::Format_RGB32);
+        for (int x = 0; x < 320; ++x)
+            for (int y = 0; y < 240; ++y)
+                image.setPixel(x, y, (x / 4) % 2 ? 0xffffffff : 0xff000000);
+        for (int i = 0; i < frames; ++i) {
+            QVideoFrame frame = VideoFrames::toNV12(image);
+            frame.setStartTime(i * 33333);
+            frame.setEndTime((i + 1) * 33333);
+            if (!QTest::qWaitFor([&input, &frame] { return input.sendVideoFrame(frame); }, 5000))
+                return {};
+        }
+        QTest::qWait(300);
+        recorder.stop();
+        if (!QTest::qWaitFor([&recorder] { return recorder.recorderState() == QMediaRecorder::StoppedState; }, 10000))
+            return {};
+        return recorder.actualLocation().toLocalFile();
+    }
+
     // A short video written from frames, for the exporter.
     static QString writeVideo(const QString &path, int frames, const QColor &color)
     {
@@ -295,6 +329,52 @@ private slots:
         QVERIFY(!tinted(first, 240, false));
         QVERIFY(!tinted(second, 80, true));
         QVERIFY(tinted(second, 240, false));
+    }
+
+    // A pixelated area on a recording coarsens each frame under it.
+    void exportsPixelation()
+    {
+        QTemporaryDir dir;
+        const QString source = writeStripes(dir.path() + u"/stripes.mp4"_s, 30);
+        QVERIFY(!source.isEmpty());
+        VideoExporter exporter;
+        QSignalSpy finished(&exporter, &VideoExporter::finished);
+        QSignalSpy failed(&exporter, &VideoExporter::failed);
+        VideoExporter::Job job;
+        job.source = source;
+        job.target = dir.path() + u"/out.mp4"_s;
+        Annotation blur;
+        blur.type = Annotation::Type::Pixelate;
+        blur.points = {QPointF(0, 0), QPointF(160, 240)};
+        blur.size = 10;
+        job.annotations = {blur};
+        QVERIFY(exporter.start(job));
+        QTRY_VERIFY_WITH_TIMEOUT(finished.count() > 0 || failed.count() > 0, 30000);
+        QVERIFY2(failed.isEmpty(), failed.isEmpty() ? "" : qPrintable(failed.first().first().toString()));
+        QMediaPlayer player;
+        QVideoSink sink;
+        player.setVideoSink(&sink);
+        QImage seen;
+        connect(&sink, &QVideoSink::videoFrameChanged, this, [&seen](const QVideoFrame &f) {
+            if (seen.isNull() && f.isValid())
+                seen = f.toImage();
+        });
+        player.setSource(QUrl::fromLocalFile(job.target));
+        player.play();
+        QTRY_VERIFY_WITH_TIMEOUT(!seen.isNull(), 10000);
+        player.stop();
+        // Stripes 1 px wide: sharp on the right, averaged to grey on the left.
+        const auto spread = [&](int x0) {
+            int low = 255, high = 0;
+            for (int x = x0; x < x0 + 20; ++x) {
+                const int g = qGray(seen.pixel(x, 120));
+                low = qMin(low, g);
+                high = qMax(high, g);
+            }
+            return high - low;
+        };
+        QVERIFY2(spread(220) > 100, qPrintable(QString::number(spread(220))));
+        QVERIFY2(spread(60) < 60, qPrintable(QString::number(spread(60))));
     }
 
     void paintsTheCursor()

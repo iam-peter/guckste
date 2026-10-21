@@ -24,6 +24,7 @@ void AnnotationLayer::setDocument(Document *document)
         connect(m_document, &Document::changed, this, [this] { update(); });
         connect(m_document, &Document::imageChanged, this, [this] { update(); });
         connect(m_document, &Document::timeChanged, this, [this] { update(); });
+        connect(m_document, &Document::backdropChanged, this, [this] { update(); });
         connect(m_document, &QObject::destroyed, this, [this] {
             m_document = nullptr;
             emit documentChanged();

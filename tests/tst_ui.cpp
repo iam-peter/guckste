@@ -26,6 +26,7 @@
 #include <QSettings>
 #include <QStandardPaths>
 #include <QTest>
+#include <QWheelEvent>
 #include <QtQml/qqmlextensionplugin.h>
 #include <QtQuickTest/quicktest.h>
 
@@ -1003,6 +1004,108 @@ private slots:
         // Right-click: the whole time again.
         document->setAnnotationTiming(0, 0, -1);
         QVERIFY(document->isShown(0));
+
+        window->setProperty("discardConfirmed", true);
+        window->close();
+        QTRY_VERIFY(!window->isVisible());
+    }
+
+    // Lanes selected together move and stretch together; many lanes
+    // scroll; the divider above the panel gives it more room.
+    void videoEditorLanesTogether()
+    {
+        QTemporaryDir dir;
+        const QString clip = writeVideo(dir.path() + u"/clip.mp4"_s, 120, Qt::darkCyan);
+        QVERIFY(!clip.isEmpty());
+        auto *document = new Document;
+        auto *exporter = new VideoExporter;
+        QQmlComponent component(m_engine);
+        component.loadFromModule("Guckste", "VideoEditorWindow");
+        auto *window = qobject_cast<QQuickWindow *>(component.createWithInitialProperties(
+            {{u"document"_s, QVariant::fromValue(document)}, {u"sourcePath"_s, clip},
+             {u"exporter"_s, QVariant::fromValue(exporter)}}));
+        QVERIFY2(window, qPrintable(component.errorString()));
+        document->setParent(window);
+        exporter->setParent(window);
+        window->resize(1000, 700);
+        window->show();
+        QVERIFY(QTest::qWaitForWindowExposed(window));
+        auto *player = window->findChild<QMediaPlayer *>(u"player"_s);
+        auto *lanes = window->findChild<QQuickItem *>(u"lanes"_s);
+        auto *panel = window->findChild<QQuickItem *>(u"bottomPanel"_s);
+        QVERIFY(player && lanes && panel);
+        QTRY_VERIFY_WITH_TIMEOUT(player->duration() > 3500, 5000);
+        QTRY_COMPARE(document->time(), 0);
+
+        // Three marks, each shown from 0.5 s to 1.5 s.
+        for (int i = 0; i < 3; ++i) {
+            document->beginAnnotation(Document::Rectangle, 10 + i * 30, 10, Qt::red, 3);
+            document->updateAnnotation(30 + i * 30, 40, false);
+            document->commitAnnotation();
+            document->setAnnotationTiming(i, 500, 1500);
+        }
+        QTRY_COMPARE(lanes->property("count").toInt(), 3);
+        QTest::qWait(100);
+        const auto at = [&](int ms, int row) {
+            qreal x = 0;
+            QMetaObject::invokeMethod(lanes, "msToX", Q_RETURN_ARG(qreal, x), Q_ARG(int, ms));
+            const qreal y = (row + 0.5) * lanes->property("laneHeight").toReal() - lanes->property("contentY").toReal();
+            return lanes->mapToScene(QPointF(x, y)).toPoint();
+        };
+
+        // Rows 0 and 2 (marks 2 and 0), picked with Ctrl, moved a second on.
+        QTest::mouseClick(window, Qt::LeftButton, Qt::ControlModifier, at(1000, 0));
+        QTest::mouseClick(window, Qt::LeftButton, Qt::ControlModifier, at(1000, 2));
+        QCOMPARE(lanes->property("chosen").toList().size(), 2);
+        QTest::mousePress(window, Qt::LeftButton, Qt::NoModifier, at(1000, 0));
+        QTest::mouseMove(window, at(1500, 0));
+        QTest::mouseMove(window, at(2000, 0));
+        QTest::mouseRelease(window, Qt::LeftButton, Qt::NoModifier, at(2000, 0));
+        const auto near = [](int a, int b) { return std::abs(a - b) < 60; };
+        QVERIFY2(near(document->annotationStart(2), 1500), qPrintable(QString::number(document->annotationStart(2))));
+        QVERIFY(near(document->annotationStart(0), 1500));
+        QCOMPARE(document->annotationStart(1), 500);
+        // One undo step for both.
+        document->undo();
+        QCOMPARE(document->annotationStart(2), 500);
+        QCOMPARE(document->annotationStart(0), 500);
+
+        // Undo reset nothing about the selection; both stretched by their
+        // out edges to 2.5 s.
+        QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier, at(1000, 0));
+        QTest::mouseClick(window, Qt::LeftButton, Qt::ShiftModifier, at(1000, 1));
+        QCOMPARE(lanes->property("chosen").toList().size(), 2);
+        QTest::mousePress(window, Qt::LeftButton, Qt::NoModifier, at(1500, 1) - QPoint(2, 0));
+        QTest::mouseMove(window, at(2000, 1));
+        QTest::mouseMove(window, at(2500, 1));
+        QTest::mouseRelease(window, Qt::LeftButton, Qt::NoModifier, at(2500, 1));
+        QVERIFY2(near(document->annotationEnd(2), 2500), qPrintable(QString::number(document->annotationEnd(2))));
+        QVERIFY(near(document->annotationEnd(1), 2500));
+        QCOMPARE(document->annotationStart(1), 500);
+        QCOMPARE(document->annotationEnd(0), 1500);
+
+        // Many marks: the lanes scroll.
+        for (int i = 0; i < 6; ++i)
+            document->addText(10, 100 + i * 10, u"More"_s, Qt::yellow, 12);
+        QTRY_COMPARE(lanes->property("count").toInt(), 9);
+        QTest::qWait(100);
+        QVERIFY(lanes->property("contentHeight").toReal() > lanes->height());
+        const QPoint inLanes = lanes->mapToScene(QPointF(lanes->width() / 2, lanes->height() / 2)).toPoint();
+        QWheelEvent wheel(inLanes, window->mapToGlobal(inLanes), QPoint(), QPoint(0, -240), Qt::NoButton,
+                          Qt::NoModifier, Qt::NoScrollPhase, false);
+        QGuiApplication::sendEvent(window, &wheel);
+        QTRY_VERIFY(lanes->property("contentY").toReal() > 0);
+
+        // The divider, dragged up: a taller panel.
+        const qreal before = panel->height();
+        const QPoint divider = panel->mapToScene(QPointF(panel->width() / 2, -2)).toPoint();
+        QTest::mousePress(window, Qt::LeftButton, Qt::NoModifier, divider);
+        QTest::mouseMove(window, divider - QPoint(0, 40));
+        QTest::mouseMove(window, divider - QPoint(0, 80));
+        QTest::mouseRelease(window, Qt::LeftButton, Qt::NoModifier, divider - QPoint(0, 80));
+        QTRY_VERIFY2(panel->height() > before + 40, qPrintable(u"%1 then %2"_s.arg(before).arg(panel->height())));
+        QTest::qWait(50);
+        saveScreenshot(window, u"video-lanes-many"_s);
 
         window->setProperty("discardConfirmed", true);
         window->close();

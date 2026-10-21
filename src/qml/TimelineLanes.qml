@@ -10,7 +10,8 @@ import Guckste.Core
 // its name on the left, and a bar for when it shows, on the timeline's
 // scale. Drag the bar to move it in time, its edges to set when it comes
 // and goes; click to select the mark, double-click to go to its start,
-// right-click for more.
+// right-click for more. Ctrl-click and Shift-click select several lanes,
+// which then move and stretch together.
 ListView {
     id: lanes
 
@@ -28,11 +29,62 @@ ListView {
     signal picked(int index)
     signal seekRequested(int ms)
 
+    // The marks whose lanes are selected, by document index.
+    property var chosen: []
+    // Where a Shift-click range starts, by row.
+    property int anchorRow: -1
+
+    function isChosen(index: int): bool {
+        return chosen.indexOf(index) >= 0
+    }
+
+    // Selects a lane as a click with these modifiers does.
+    function choose(row: int, index: int, modifiers: int) {
+        if (modifiers & Qt.ShiftModifier && anchorRow >= 0) {
+            const list = []
+            for (let r = Math.min(anchorRow, row); r <= Math.max(anchorRow, row); ++r)
+                list.push(count - 1 - r)
+            chosen = list
+        } else if (modifiers & (Qt.ControlModifier | Qt.MetaModifier)) {
+            chosen = isChosen(index) ? chosen.filter(i => i !== index) : chosen.concat([index])
+            anchorRow = row
+        } else {
+            chosen = [index]
+            anchorRow = row
+        }
+        document.selectedIndex = index
+        picked(index)
+    }
+
+    // The selected lanes' timings, ends to the end made explicit.
+    function chosenTimings(): var {
+        return chosen.map(i => ({
+            index: i,
+            start: document.annotationStart(i),
+            end: document.annotationEnd(i) < 0 ? duration : document.annotationEnd(i)
+        }))
+    }
+
+    // Applies timings, an end at the very end staying "to the end".
+    function timingList(timings: var): var {
+        return timings.map(t => [t.index, t.start, t.end >= duration ? -1 : t.end])
+    }
+
+    Connections {
+        target: lanes.model
+        // Lanes came, went or moved: indices no longer hold.
+        function onModelReset() {
+            lanes.chosen = []
+            lanes.anchorRow = -1
+        }
+    }
+
     implicitHeight: Math.min(count, 4) * laneHeight
     visible: count > 0
     clip: true
-    // Scrolled by the wheel and the scroll bar; a drag is for the bars.
-    interactive: false
+    // Scrolls by the wheel, the scroll bar, or a drag beside the bars; a
+    // drag on a bar is the bar's.
+    flickableDirection: Flickable.VerticalFlick
     boundsBehavior: Flickable.StopAtBounds
     ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
     model: LayerModel {
@@ -55,15 +107,15 @@ ListView {
         required property int startMs
         required property int endMs
 
-        readonly property bool current: layerIndex === lanes.document.selectedIndex
+        readonly property bool current: lanes.isChosen(layerIndex)
+                                        || (lanes.chosen.length === 0 && layerIndex === lanes.document.selectedIndex)
         readonly property int shownEnd: endMs < 0 ? lanes.duration : endMs
 
         width: ListView.view.width
         height: lanes.laneHeight
 
-        function pick() {
-            lanes.document.selectedIndex = lane.layerIndex
-            lanes.picked(lane.layerIndex)
+        function pick(modifiers: int) {
+            lanes.choose(lane.index, lane.layerIndex, modifiers)
             // Out of view at the playhead: go to where it shows.
             if (!lanes.document.isShown(lane.layerIndex))
                 lanes.seekRequested(lane.startMs)
@@ -88,7 +140,12 @@ ListView {
                 font.pixelSize: 11
                 font.bold: lane.current
             }
-            TapHandler { onTapped: lane.pick() }
+        }
+
+        MouseArea {
+            width: lanes.trackX
+            height: parent.height
+            onClicked: event => lane.pick(event.modifiers)
         }
 
         // The track, and the bar for when the mark shows.
@@ -130,8 +187,9 @@ ListView {
             // "move", "in", "out"
             property string mode: ""
             property real pressX
-            property int startAtPress
-            property int endAtPress
+            // The selected lanes' timings when the drag began.
+            property var atPress: []
+            property bool moved: false
 
             x: lanes.msToX(0) - 6
             width: lanes.msToX(lanes.duration) - x + 12
@@ -164,73 +222,104 @@ ListView {
 
             onPressed: event => {
                 if (event.button === Qt.RightButton) {
-                    lane.pick()
+                    // Keeps a selection the lane is in, for the menu.
+                    if (!lanes.isChosen(lane.layerIndex))
+                        lane.pick(Qt.NoModifier)
                     menu.popup()
                     return
                 }
                 const edge = edgeAt(event.x)
-                if (edge === "" && !overBar(event.x)) {
-                    lane.pick()
+                const modifiers = event.modifiers & (Qt.ShiftModifier | Qt.ControlModifier | Qt.MetaModifier)
+                if ((edge === "" && !overBar(event.x)) || modifiers) {
+                    lane.pick(event.modifiers)
                     return
                 }
-                lanes.document.selectedIndex = lane.layerIndex
-                lanes.picked(lane.layerIndex)
+                // A bar outside the selection is taken alone.
+                if (!lanes.isChosen(lane.layerIndex))
+                    lane.pick(Qt.NoModifier)
+                else {
+                    lanes.document.selectedIndex = lane.layerIndex
+                    lanes.picked(lane.layerIndex)
+                }
                 mode = edge !== "" ? edge : "move"
+                moved = false
                 pressX = event.x
-                startAtPress = lane.startMs
-                endAtPress = lane.shownEnd
-                lanes.document.beginRetime(lane.layerIndex)
+                atPress = lanes.chosenTimings()
+                lanes.document.beginRetimeMany()
             }
             onPositionChanged: event => {
                 if (mode === "")
                     return
                 const minimum = 100
-                const delta = msAt(event.x) - msAt(pressX)
-                let start = startAtPress
-                let end = endAtPress
+                let delta = msAt(event.x) - msAt(pressX)
+                if (Math.abs(event.x - pressX) >= 2)
+                    moved = true
+                let timings
                 if (mode === "move") {
-                    const length = endAtPress - startAtPress
-                    start = Math.max(0, Math.min(lanes.duration - length, startAtPress + delta))
-                    end = start + length
+                    // Together, held so none leaves the video.
+                    const first = Math.min(...atPress.map(t => t.start))
+                    const last = Math.max(...atPress.map(t => t.end))
+                    delta = Math.max(-first, Math.min(lanes.duration - last, delta))
+                    timings = atPress.map(t => ({ index: t.index, start: t.start + delta, end: t.end + delta }))
                 } else if (mode === "in") {
-                    start = Math.max(0, Math.min(endAtPress - minimum, startAtPress + delta))
+                    timings = atPress.map(t => ({
+                        index: t.index,
+                        start: Math.max(0, Math.min(t.end - minimum, t.start + delta)),
+                        end: t.end
+                    }))
                 } else {
-                    end = Math.min(lanes.duration, Math.max(startAtPress + minimum, endAtPress + delta))
+                    timings = atPress.map(t => ({
+                        index: t.index,
+                        start: t.start,
+                        end: Math.min(lanes.duration, Math.max(t.start + minimum, t.end + delta))
+                    }))
                 }
-                // Up to the end stays "to the end".
-                lanes.document.retime(start, end >= lanes.duration ? -1 : end)
+                lanes.document.retimeMany(lanes.timingList(timings))
             }
             onReleased: {
                 if (mode !== "")
                     lanes.document.endRetime()
+                // A click on a bar of several selected: that one alone.
+                if (mode === "move" && !moved && lanes.chosen.length > 1)
+                    lanes.choose(lane.index, lane.layerIndex, Qt.NoModifier)
                 mode = ""
             }
             onDoubleClicked: lanes.seekRequested(lane.startMs)
 
             ToolTip.visible: mode !== ""
             ToolTip.text: `${lanes.timeline.time(lane.startMs)} – ${lanes.timeline.time(lane.shownEnd)}`
+                          + (lanes.chosen.length > 1 ? qsTr(" (%1 marks)").arg(lanes.chosen.length) : "")
         }
 
+        // For every selected lane.
         Menu {
             id: menu
             MenuItem {
                 text: qsTr("Show from the playhead")
-                enabled: lane.endMs < 0 || lanes.position < lane.endMs
-                onTriggered: lanes.document.setAnnotationTiming(lane.layerIndex, lanes.position, lane.endMs)
+                onTriggered: lanes.document.setTimings(lanes.timingList(lanes.chosenTimings()
+                    .filter(t => lanes.position < t.end)
+                    .map(t => ({ index: t.index, start: lanes.position, end: t.end }))))
             }
             MenuItem {
                 text: qsTr("Hide from the playhead")
-                enabled: lanes.position > lane.startMs
-                onTriggered: lanes.document.setAnnotationTiming(lane.layerIndex, lane.startMs, lanes.position)
+                onTriggered: lanes.document.setTimings(lanes.timingList(lanes.chosenTimings()
+                    .filter(t => lanes.position > t.start)
+                    .map(t => ({ index: t.index, start: t.start, end: lanes.position }))))
             }
             MenuItem {
                 text: qsTr("Show the whole time")
-                onTriggered: lanes.document.setAnnotationTiming(lane.layerIndex, 0, -1)
+                onTriggered: lanes.document.setTimings(lanes.chosen.map(i => [i, 0, -1]))
             }
             MenuSeparator {}
             MenuItem {
-                text: qsTr("Remove")
-                onTriggered: lanes.document.removeAnnotation(lane.layerIndex)
+                text: lanes.chosen.length > 1 ? qsTr("Remove %1 marks").arg(lanes.chosen.length) : qsTr("Remove")
+                onTriggered: {
+                    // From the top down, so the indices below stay.
+                    const indices = lanes.chosen.slice().sort((a, b) => b - a)
+                    lanes.chosen = []
+                    for (const i of indices)
+                        lanes.document.removeAnnotation(i)
+                }
             }
         }
     }

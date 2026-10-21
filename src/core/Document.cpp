@@ -686,6 +686,47 @@ QImage Document::render(qreal scale, const QRect &region) const
     return out;
 }
 
+void Document::setBackdropFrame(const QVideoFrame &frame)
+{
+    if (!frame.isValid())
+        return;
+    m_backdropFrame = frame;
+    m_backdropStale = true;
+    for (const Annotation &a : std::as_const(m_annotations)) {
+        if (a.type == Annotation::Type::Pixelate && a.shownAt(m_time)) {
+            emit backdropChanged();
+            return;
+        }
+    }
+}
+
+void Document::followVideo(QVideoSink *sink)
+{
+    if (m_followed == sink)
+        return;
+    if (m_followed)
+        disconnect(m_followed, nullptr, this, nullptr);
+    m_followed = sink;
+    if (sink)
+        connect(sink, &QVideoSink::videoFrameChanged, this, &Document::setBackdropFrame);
+}
+
+const QImage &Document::baseImage() const
+{
+    if (!m_backdropFrame.isValid())
+        return m_image;
+    if (m_backdropStale) {
+        m_backdropStale = false;
+        QVideoFrame frame = m_backdropFrame;
+        QImage image = frame.toImage();
+        // On the screenshot's pixels, which the marks are placed on.
+        if (!m_image.isNull() && image.size() != m_image.size())
+            image = image.scaled(m_image.size(), Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
+        m_backdropImage = image.convertToFormat(QImage::Format_ARGB32_Premultiplied);
+    }
+    return m_backdropImage.isNull() ? m_image : m_backdropImage;
+}
+
 void Document::setTime(int ms)
 {
     if (m_time == ms)
@@ -748,6 +789,40 @@ void Document::retime(int startMs, int endMs)
 void Document::endRetime()
 {
     m_retiming = -1;
+}
+
+void Document::beginRetimeMany()
+{
+    pushUndo();
+}
+
+void Document::retimeMany(const QVariantList &timings)
+{
+    bool any = false;
+    for (const QVariant &entry : timings) {
+        const QVariantList t = entry.toList();
+        if (t.size() != 3)
+            continue;
+        const int index = t[0].toInt();
+        const int start = qMax(0, t[1].toInt());
+        const int end = t[2].toInt();
+        if (index < 0 || index >= m_annotations.size() || (end >= 0 && end <= start))
+            continue;
+        Annotation &a = m_annotations[index];
+        if (a.startMs == start && a.endMs == end)
+            continue;
+        a.startMs = start;
+        a.endMs = end;
+        any = true;
+    }
+    if (any)
+        emit changed();
+}
+
+void Document::setTimings(const QVariantList &timings)
+{
+    pushUndo();
+    retimeMany(timings);
 }
 
 QVariantList Document::guides() const
@@ -815,11 +890,12 @@ void Document::paintLayers(QPainter &painter, qreal scale, const QPointF &origin
                            bool withCurrent) const
 {
     const int count = upTo < 0 ? m_annotations.size() : qMin<int>(upTo, m_annotations.size());
-    if (withBase && !m_image.isNull()) {
+    const QImage &base = withBase ? baseImage() : m_image;
+    if (withBase && !base.isNull()) {
         painter.save();
         // Enlarging keeps every pixel a crisp block, shrinking averages them.
         painter.setRenderHint(QPainter::SmoothPixmapTransform, scale < 1);
-        painter.drawImage(QRectF(-origin * scale, QSizeF(m_image.size()) * scale), m_image);
+        painter.drawImage(QRectF(-origin * scale, QSizeF(base.size()) * scale), base);
         painter.restore();
     }
     AnnotationPainter marks(painter, m_image, scale, origin);

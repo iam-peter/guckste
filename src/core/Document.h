@@ -9,6 +9,9 @@
 #include <QRectF>
 #include <QUrl>
 #include <QVariantList>
+#include <QPointer>
+#include <QVideoFrame>
+#include <QVideoSink>
 #include <QtQml/qqmlregistration.h>
 
 #include <optional>
@@ -80,6 +83,11 @@ public:
     int revision() const { return m_revision; }
     int time() const { return m_time; }
     void setTime(int ms);
+    // On a recording: the frame on screen, which pixelated marks coarsen
+    // in place of the screenshot. Converted only when one needs it.
+    void setBackdropFrame(const QVideoFrame &frame);
+    // Takes each frame a video output shows as that frame.
+    Q_INVOKABLE void followVideo(QVideoSink *sink);
     // Whether a mark is shown at the document's time.
     Q_INVOKABLE bool isShown(int index) const;
     Q_INVOKABLE int annotationStart(int index) const;
@@ -90,6 +98,12 @@ public:
     Q_INVOKABLE void beginRetime(int index);
     Q_INVOKABLE void retime(int startMs, int endMs);
     Q_INVOKABLE void endRetime();
+    // Several at once, as when lanes are selected together: one undo step
+    // from beginRetimeMany() to endRetime(); each timing is a list of
+    // index, start and end.
+    Q_INVOKABLE void beginRetimeMany();
+    Q_INVOKABLE void retimeMany(const QVariantList &timings);
+    Q_INVOKABLE void setTimings(const QVariantList &timings);
     QVariantList guides() const;
     bool exportGuides() const { return m_exportGuides; }
     void setExportGuides(bool on);
@@ -187,6 +201,8 @@ signals:
     void canvasChanged();
     void guidesChanged();
     void timeChanged();
+    // The frame under pixelated marks changed, and with it how they look.
+    void backdropChanged();
     void exportGuidesChanged();
     void selectedIndexChanged();
     void filePathChanged();
@@ -224,5 +240,11 @@ private:
     QList<Guide> m_guides;
     bool m_exportGuides = false;
     int m_time = -1;
+    // What stands under the marks: the screenshot, or a recording's frame.
+    const QImage &baseImage() const;
+    QVideoFrame m_backdropFrame;
+    QPointer<QVideoSink> m_followed;
+    mutable QImage m_backdropImage;
+    mutable bool m_backdropStale = false;
     int m_retiming = -1;
 };

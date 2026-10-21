@@ -10,6 +10,7 @@
 #include <QSignalSpy>
 #include <QTemporaryDir>
 #include <QTest>
+#include <QVideoFrame>
 
 using namespace Qt::StringLiterals;
 
@@ -452,6 +453,28 @@ private slots:
         // A screenshot shows all of them.
         doc.setTime(-1);
         QVERIFY(doc.isShown(0));
+    }
+
+    // On a recording, pixelated marks coarsen the frame on screen, not
+    // the screenshot the document started with.
+    void pixelatesTheFrameShown()
+    {
+        Document doc;
+        QImage red(40, 40, QImage::Format_ARGB32_Premultiplied);
+        red.fill(Qt::red);
+        doc.setImage(red);
+        doc.beginAnnotation(Document::Pixelate, 0, 0, Qt::black, 4);
+        doc.updateAnnotation(40, 40, false);
+        doc.commitAnnotation();
+        QCOMPARE(doc.render(1).pixelColor(20, 20), QColor(Qt::red));
+
+        QSignalSpy backdrop(&doc, &Document::backdropChanged);
+        QImage blue(40, 40, QImage::Format_RGB32);
+        blue.fill(Qt::blue);
+        doc.setBackdropFrame(QVideoFrame(blue));
+        QCOMPARE(backdrop.count(), 1);
+        const QColor shown = doc.render(1).pixelColor(20, 20);
+        QVERIFY2(shown.blue() > 200 && shown.red() < 50, qPrintable(shown.name()));
     }
 
     void cropsWithAnnotations()

@@ -127,7 +127,11 @@ end; drag the bar's edges to set when it comes and goes, or the bar to
 move it in time. Click a lane to select its mark (going to where it
 shows if it is not there at the playhead), double-click to go to its
 start, and right-click to show or hide it from the playhead, show it the
-whole time, or remove it.
+whole time, or remove it. Ctrl-click and Shift-click select several
+lanes: dragged, they move together, and an edge stretches all of them;
+the right-click actions go to all of them too. The lanes scroll, and the
+divider above the controls makes room for more of them. A pixelated
+area coarsens the frame on screen, as it will in the saved video.
 
 Save (Ctrl+S) writes the video to the screenshot folder with each mark
 on the frames of its time and the trimmed parts left out, re-encoding

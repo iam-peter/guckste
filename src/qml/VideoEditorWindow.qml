@@ -178,59 +178,61 @@ ApplicationWindow {
         IconButton { iconName: "settings"; tip: qsTr("Settings"); onClicked: App.openSettings() }
     }
 
-    Item {
-        id: stage
+    // The video above, the controls, the timeline and the lanes below,
+    // with a divider between them to drag.
+    SplitView {
+        id: split
         anchors.fill: parent
+        orientation: Qt.Vertical
 
-        // The video at its own size, scaled down to fit: marks are drawn
-        // at output size, so what is seen is what is saved.
         Item {
-            id: canvas
-            x: Math.round((stage.width - root.videoWidth * root.fit) / 2)
-            y: Math.round((stage.height - root.videoHeight * root.fit) / 2)
-            width: root.videoWidth
-            height: root.videoHeight
-            scale: root.fit
-            transformOrigin: Item.TopLeft
+            id: stage
+            SplitView.fillHeight: true
 
-            VideoOutput {
-                id: videoView
-                anchors.fill: parent
-                fillMode: VideoOutput.Stretch
+            // The video at its own size, scaled down to fit: marks are drawn
+            // at output size, so what is seen is what is saved.
+            Item {
+                id: canvas
+                x: Math.round((stage.width - root.videoWidth * root.fit) / 2)
+                y: Math.round((stage.height - root.videoHeight * root.fit) / 2)
+                width: root.videoWidth
+                height: root.videoHeight
+                scale: root.fit
+                transformOrigin: Item.TopLeft
+
+                VideoOutput {
+                    id: videoView
+                    anchors.fill: parent
+                    fillMode: VideoOutput.Stretch
+                }
+                // Pixelated marks coarsen the frame on screen, not the first.
+                Component.onCompleted: root.document.followVideo(videoView.videoSink)
+
+                DrawingArea {
+                    id: marks
+                    anchors.fill: parent
+                    document: root.document
+                    zoom: 1
+                    tool: root.tool
+                    toolColor: root.toolColor
+                    size: root.size
+                    textSize: root.textSize
+                }
             }
+        }
 
-            DrawingArea {
-                id: marks
+        Pane {
+            id: bottomPanel
+            objectName: "bottomPanel"
+            SplitView.preferredHeight: Math.min(implicitHeight, split.height / 2)
+            SplitView.minimumHeight: controlsColumn.children[0].implicitHeight + topPadding + bottomPadding
+            padding: 6
+            background: Rectangle { color: root.palette.window }
+
+            ColumnLayout {
+                id: controlsColumn
                 anchors.fill: parent
-                document: root.document
-                zoom: 1
-                tool: root.tool
-                toolColor: root.toolColor
-                size: root.size
-                textSize: root.textSize
-            }
-        }
-    }
-
-    footer: ToolBar {
-        id: status
-
-        property string message: ""
-
-        function flash(text: string) {
-            message = text
-            messageTimer.restart()
-        }
-        Timer {
-            id: messageTimer
-            interval: 5000
-            onTriggered: status.message = ""
-        }
-
-        padding: 6
-        ColumnLayout {
-            anchors.fill: parent
-            spacing: 4
+                spacing: 4
 
             RowLayout {
                 Layout.fillWidth: true
@@ -278,6 +280,8 @@ ApplicationWindow {
                 id: lanes
                 objectName: "lanes"
                 Layout.fillWidth: true
+                // As tall as the divider above leaves room for.
+                Layout.fillHeight: true
                 document: root.document
                 timeline: timeline
                 trackX: timeline.x
@@ -287,6 +291,29 @@ ApplicationWindow {
                 onPicked: root.tool = Document.Select
                 onSeekRequested: ms => { player.pause(); player.position = ms }
             }
+            }
+        }
+    }
+
+    footer: ToolBar {
+        id: status
+
+        property string message: ""
+
+        function flash(text: string) {
+            message = text
+            messageTimer.restart()
+        }
+        Timer {
+            id: messageTimer
+            interval: 5000
+            onTriggered: status.message = ""
+        }
+
+        padding: 6
+        ColumnLayout {
+            anchors.fill: parent
+            spacing: 4
 
             RowLayout {
                 spacing: 12
