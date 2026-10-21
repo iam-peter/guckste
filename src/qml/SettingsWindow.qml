@@ -81,6 +81,14 @@ Window {
             checked: Preferences.showKeys
             onToggled: Preferences.showKeys = checked
         }
+        Label {
+            visible: Preferences.showKeysSupported && Qt.platform.os === "osx"
+            Layout.fillWidth: true
+            wrapMode: Text.WordWrap
+            color: palette.placeholderText
+            font.pixelSize: 12
+            text: qsTr("macOS asks for the Accessibility permission for that: System Settings → Privacy & Security.")
+        }
         CheckBox {
             text: qsTr("Copy the file path to the clipboard after saving")
             checked: Preferences.copyPathAfterSave

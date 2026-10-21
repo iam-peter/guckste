@@ -2,6 +2,7 @@
 
 #include <QColor>
 #include <QObject>
+#include <QRect>
 #include <QSettings>
 #include <QtQml/qqmlregistration.h>
 
@@ -29,6 +30,7 @@ class Preferences : public QObject
     Q_PROPERTY(bool includeCursor READ includeCursor WRITE setIncludeCursor NOTIFY changed)
     Q_PROPERTY(bool showKeys READ showKeys WRITE setShowKeys NOTIFY changed)
     Q_PROPERTY(bool showKeysSupported READ showKeysSupported CONSTANT)
+    Q_PROPERTY(QRect lastRegion READ lastRegion WRITE setLastRegion NOTIFY changed)
 
 public:
     static Preferences *instance();
@@ -67,6 +69,10 @@ public:
     bool showKeys() const;
     void setShowKeys(bool on);
     bool showKeysSupported() const;
+    // The region last captured or recorded, in screen coordinates, offered
+    // again next time.
+    QRect lastRegion() const;
+    void setLastRegion(const QRect &region);
 
     // Where the next screenshot goes: the directory, the pattern, .png.
     Q_INVOKABLE QString nextSavePath() const;

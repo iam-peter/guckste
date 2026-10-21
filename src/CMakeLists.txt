@@ -19,6 +19,7 @@ qt_add_qml_module(guckste_core
         core/CursorCapture.h core/CursorCapture.cpp
         core/KeyListener.h core/KeyListener.cpp
         core/KeyOverlay.h core/KeyOverlay.cpp
+        core/WindowFinder.h core/WindowFinder.cpp
 )
 # The generated QML type registrations include headers by file name only.
 target_include_directories(guckste_core
@@ -30,8 +31,20 @@ if(TARGET Qt6::DBus)
     target_link_libraries(guckste_core PUBLIC Qt6::DBus)
     target_compile_definitions(guckste_core PUBLIC GUCKSTE_HAVE_DBUS)
 endif()
-# The pointer image (XFixes) and the keys pressed anywhere (XInput2) on X11.
-if(X11_FOUND AND X11_Xfixes_FOUND AND X11_Xi_FOUND)
+# The pointer image, the keys pressed anywhere and the windows on screen:
+# XFixes, XInput2 and the window tree on X11; Win32 and DWM on Windows;
+# AppKit, an event tap and the window list on macOS.
+if(WIN32)
+    target_link_libraries(guckste_core PUBLIC user32 gdi32 dwmapi)
+elseif(APPLE)
+    target_sources(guckste_core PRIVATE
+        core/CursorCapture_mac.mm
+        core/KeyListener_mac.mm
+        core/WindowFinder_mac.mm
+    )
+    target_link_libraries(guckste_core PUBLIC
+        "-framework AppKit" "-framework Carbon" "-framework ApplicationServices" "-framework CoreGraphics")
+elseif(X11_FOUND AND X11_Xfixes_FOUND AND X11_Xi_FOUND)
     target_link_libraries(guckste_core PUBLIC X11::X11 X11::Xfixes X11::Xi)
     target_compile_definitions(guckste_core PUBLIC GUCKSTE_HAVE_X11)
 endif()
@@ -117,7 +130,7 @@ qt_add_qml_module(guckste_qml
         icons/zoom-out.svg
         logo/guckste.svg
 )
-target_link_libraries(guckste_qml PUBLIC guckste_ui guckste_uiplugin Qt6::Quick Qt6::QuickControls2)
+target_link_libraries(guckste_qml PUBLIC guckste_ui guckste_uiplugin Qt6::Quick Qt6::QuickControls2 Qt6::QuickShapes)
 
 qt_add_executable(guckste main.cpp)
 target_compile_definitions(guckste PRIVATE PROJECT_VERSION="${PROJECT_VERSION}")

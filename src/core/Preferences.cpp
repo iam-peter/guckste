@@ -23,6 +23,7 @@ const auto kQuality = "recording/quality";
 const auto kEditAfter = "recording/editAfterRecording";
 const auto kIncludeCursor = "capture/includeCursor";
 const auto kShowKeys = "recording/showKeys";
+const auto kLastRegion = "capture/lastRegion";
 const auto kDefaultPattern = "guckste_%Y-%m-%d_%H-%M-%S";
 } // namespace
 
@@ -252,6 +253,19 @@ void Preferences::setShowKeys(bool on)
 bool Preferences::showKeysSupported() const
 {
     return KeyListener::supported();
+}
+
+QRect Preferences::lastRegion() const
+{
+    return m_settings.value(kLastRegion).toRect();
+}
+
+void Preferences::setLastRegion(const QRect &region)
+{
+    if (region == lastRegion())
+        return;
+    m_settings.setValue(kLastRegion, region);
+    emit changed();
 }
 
 QString Preferences::nextRecordingPath(const QString &suffix) const

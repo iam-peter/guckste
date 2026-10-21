@@ -132,7 +132,11 @@ bool ScreenRecorder::start(const QRect &region, const QString &path, const Optio
             m_keys.add(label);
             emit recentKeysChanged();
         });
-        m_keyListener->begin();
+        if (!m_keyListener->begin()) {
+            m_keyListener.reset();
+            const QString why = KeyListener::requirement();
+            emit notice(why.isEmpty() ? tr("The keys pressed cannot be listened to here.") : why);
+        }
     }
     emit outputPathChanged();
     QMediaFormat format = Encoding::bestFormat();

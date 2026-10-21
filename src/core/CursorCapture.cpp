@@ -2,10 +2,15 @@
 
 #include <QCursor>
 #include <QGuiApplication>
+#include <QScreen>
 #include <QPainter>
 #include <QPainterPath>
 
-#ifdef GUCKSTE_HAVE_X11
+#if defined(Q_OS_WIN)
+#include <windows.h>
+#elif defined(Q_OS_MACOS)
+bool macCursor(CursorCapture::Cursor &cursor);
+#elif defined(GUCKSTE_HAVE_X11)
 #include <X11/Xlib.h>
 #include <X11/extensions/Xfixes.h>
 #endif
@@ -37,6 +42,76 @@ QImage fallbackArrow()
     return arrow;
 }
 
+#if defined(Q_OS_WIN)
+// The cursor drawn into a bitmap with GDI, as Windows draws it.
+bool winCursor(CursorCapture::Cursor &cursor)
+{
+    CURSORINFO info{};
+    info.cbSize = sizeof(info);
+    if (!GetCursorInfo(&info) || !(info.flags & CURSOR_SHOWING) || !info.hCursor)
+        return false;
+    ICONINFO icon{};
+    if (!GetIconInfo(info.hCursor, &icon))
+        return false;
+    BITMAP bitmap{};
+    GetObject(icon.hbmColor ? icon.hbmColor : icon.hbmMask, sizeof(bitmap), &bitmap);
+    const int width = bitmap.bmWidth;
+    // A monochrome cursor's mask bitmap holds the AND and XOR halves.
+    const int height = icon.hbmColor ? bitmap.bmHeight : bitmap.bmHeight / 2;
+    bool ok = false;
+    if (width > 0 && height > 0) {
+        HDC dc = CreateCompatibleDC(nullptr);
+        BITMAPINFO bi{};
+        bi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+        bi.bmiHeader.biWidth = width;
+        bi.bmiHeader.biHeight = -height;
+        bi.bmiHeader.biPlanes = 1;
+        bi.bmiHeader.biBitCount = 32;
+        bi.bmiHeader.biCompression = BI_RGB;
+        void *bits = nullptr;
+        HBITMAP dib = CreateDIBSection(dc, &bi, DIB_RGB_COLORS, &bits, nullptr, 0);
+        if (dib && bits) {
+            HGDIOBJ old = SelectObject(dc, dib);
+            memset(bits, 0, size_t(width) * height * 4);
+            DrawIconEx(dc, 0, 0, info.hCursor, width, height, 0, nullptr, DI_NORMAL);
+            QImage image(static_cast<const uchar *>(bits), width, height, width * 4,
+                         QImage::Format_ARGB32_Premultiplied);
+            image = image.copy();
+            // Without an alpha channel, what was drawn is what is opaque.
+            bool hasAlpha = false;
+            for (int y = 0; y < height && !hasAlpha; ++y) {
+                const QRgb *row = reinterpret_cast<const QRgb *>(image.constScanLine(y));
+                for (int x = 0; x < width && !hasAlpha; ++x)
+                    hasAlpha = qAlpha(row[x]) != 0;
+            }
+            if (!hasAlpha) {
+                for (int y = 0; y < height; ++y) {
+                    QRgb *row = reinterpret_cast<QRgb *>(image.scanLine(y));
+                    for (int x = 0; x < width; ++x)
+                        row[x] = (row[x] & 0xffffff) ? (row[x] | 0xff000000) : 0;
+                }
+            }
+            cursor.image = image;
+            cursor.hotspot = QPoint(int(icon.xHotspot), int(icon.yHotspot));
+            cursor.position = QCursor::pos();
+            if (QScreen *screen = QGuiApplication::screenAt(cursor.position))
+                cursor.imageDevicePixelRatio = screen->devicePixelRatio();
+            cursor.ok = true;
+            ok = true;
+            SelectObject(dc, old);
+        }
+        if (dib)
+            DeleteObject(dib);
+        DeleteDC(dc);
+    }
+    if (icon.hbmColor)
+        DeleteObject(icon.hbmColor);
+    if (icon.hbmMask)
+        DeleteObject(icon.hbmMask);
+    return ok;
+}
+#endif
+
 #ifdef GUCKSTE_HAVE_X11
 Display *display()
 {
@@ -60,7 +135,13 @@ Display *display()
 CursorCapture::Cursor CursorCapture::current()
 {
     Cursor cursor;
-#ifdef GUCKSTE_HAVE_X11
+#if defined(Q_OS_WIN)
+    if (winCursor(cursor))
+        return cursor;
+#elif defined(Q_OS_MACOS)
+    if (macCursor(cursor))
+        return cursor;
+#elif defined(GUCKSTE_HAVE_X11)
     if (Display *d = display()) {
         if (XFixesCursorImage *ci = XFixesGetCursorImage(d)) {
             QImage image(ci->width, ci->height, QImage::Format_ARGB32_Premultiplied);
@@ -90,11 +171,13 @@ void CursorCapture::paint(QImage &target, const QRect &area, qreal devicePixelRa
 {
     if (!cursor.ok || cursor.image.isNull() || target.isNull())
         return;
-    const QPointF at = (cursor.position - area.topLeft() - cursor.hotspot) * devicePixelRatio;
-    const QRectF drawn(at, cursor.image.size() * devicePixelRatio);
+    const qreal imageRatio = cursor.imageDevicePixelRatio > 0 ? cursor.imageDevicePixelRatio : 1;
+    const QPointF at = (QPointF(cursor.position - area.topLeft()) - QPointF(cursor.hotspot) / imageRatio)
+                       * devicePixelRatio;
+    const QRectF drawn(at, QSizeF(cursor.image.size()) / imageRatio * devicePixelRatio);
     if (!drawn.intersects(QRectF(target.rect())))
         return;
     QPainter p(&target);
-    p.setRenderHint(QPainter::SmoothPixmapTransform, devicePixelRatio != 1);
+    p.setRenderHint(QPainter::SmoothPixmapTransform, !qFuzzyCompare(devicePixelRatio, imageRatio));
     p.drawImage(drawn, cursor.image);
 }

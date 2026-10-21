@@ -5,8 +5,9 @@
 #include <QRect>
 
 // The pointer as it is on screen, to paint into screenshots and recorded
-// frames, which Qt leaves it out of. On X11 the XFixes extension has the
-// real cursor image; elsewhere a plain arrow stands in for it.
+// frames, which Qt leaves it out of. X11's XFixes extension, Windows'
+// cursor info and macOS's AppKit have the real cursor image; on Wayland a
+// plain arrow stands in for it.
 namespace CursorCapture {
 
 struct Cursor
@@ -14,6 +15,9 @@ struct Cursor
     QImage image;     // premultiplied ARGB
     QPoint hotspot;   // in the image
     QPoint position;  // global, logical pixels
+    // Image pixels per logical pixel: a Retina or HiDPI cursor is bigger
+    // than the size it is shown at.
+    qreal imageDevicePixelRatio = 1;
     bool ok = false;
 };
 

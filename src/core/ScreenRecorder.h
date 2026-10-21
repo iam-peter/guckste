@@ -86,6 +86,8 @@ signals:
     // The file is complete.
     void finished(const QString &path);
     void errorOccurred(const QString &message);
+    // Something to tell that does not stop the recording.
+    void notice(const QString &message);
     void recentKeysChanged();
 
 private:

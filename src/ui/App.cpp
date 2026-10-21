@@ -6,6 +6,7 @@
 #include "core/Encoding.h"
 #include "core/ScreenRecorder.h"
 #include "core/VideoExporter.h"
+#include "core/WindowFinder.h"
 
 #include <QAction>
 #include <QApplication>
@@ -47,6 +48,8 @@ App::App(QQmlEngine *engine, QObject *parent)
     });
     connect(m_recorder, &ScreenRecorder::errorOccurred, this,
             [this](const QString &message) { notify(tr("Recording failed"), message); });
+    connect(m_recorder, &ScreenRecorder::notice, this,
+            [this](const QString &message) { notify(tr("Recording"), message); });
 }
 
 App::~App()
@@ -186,10 +189,16 @@ void App::openOverlay(bool recordMode)
             }
             auto *document = new Document;
             document->setImage(capture.image);
+            // The windows on screen, for picking one: as rects in capture
+            // coordinates, front to back.
+            QVariantList windows;
+            for (const QRect &w : WindowFinder::windows())
+                windows << QRectF(w.translated(-capture.geometry.topLeft()));
             QQuickWindow *overlay = createWindow(QStringLiteral("CaptureOverlay"),
                                                  {{QStringLiteral("document"), QVariant::fromValue(document)},
                                                   {QStringLiteral("screenGeometry"), capture.geometry},
-                                                  {QStringLiteral("recordMode"), recordMode}});
+                                                  {QStringLiteral("recordMode"), recordMode},
+                                                  {QStringLiteral("windowRects"), windows}});
             if (!overlay) {
                 delete document;
                 return;

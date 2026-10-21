@@ -56,8 +56,12 @@ quits the running one and takes its place, for a new build):
 ### Picking a region
 
 The screen is dimmed and a crosshair follows the pointer with its
-coordinates. Drag out a region, or click to take the whole screen under
-the pointer; Ctrl+A takes all screens. The region can be dragged, resized
+coordinates. The window under the pointer is outlined, and a click takes
+it, frame included; a click on no window takes the whole screen under
+the pointer, and Ctrl+A all screens. Drag to pick any other region. The
+region of last time is drawn dashed with a badge that takes it again,
+so the same part of the screen can be captured or recorded over and
+over. The region can be dragged, resized
 by its handles and nudged with the arrow keys (Shift for 10 px). A toolbar
 appears under it:
 
@@ -83,11 +87,14 @@ recorded there is no panel: the tray menu's Stop Recording or `guckste
 record` ends it.
 
 The pointer is in screenshots and recordings unless the settings say
-otherwise; on X11 it is the real cursor image, elsewhere an arrow stands
-in for it. On X11 the settings can also show the keys pressed while
-recording as chips along the bottom of the video, `Ctrl+Shift+S` and the
-like, each for a few seconds, and in the panel. Every key on the desktop
-is listened to while that is on, so leave it off when typing a password.
+otherwise: the real cursor image on X11 (XFixes), Windows and macOS,
+and an arrow standing in for it on Wayland. The settings can also show
+the keys pressed while recording as chips along the bottom of the video,
+`Ctrl+Shift+S` and the like, each for a few seconds, and in the panel:
+from XInput2 on X11, a keyboard hook on Windows, an event tap on macOS,
+which asks for the Accessibility permission. Wayland has no way to
+listen, so the option is not offered there. Every key on the desktop is
+seen while that is on, so leave it off when typing a password.
 
 Stopping opens the recording in the video editor (the settings can send
 it straight to the screenshot folder instead). The same tools draw on
@@ -194,9 +201,10 @@ build next to the Guckste in use, give it its own instance name:
 
 Platforms: X11 is where it is used and tested. On Wayland the screenshot
 comes from the desktop portal and the overlay covers the screen it is put
-on; several screens at once are not supported there yet, and recording
-needs Qt's Wayland screen capture. Windows and macOS build and capture
-through Qt, but have had less testing.
+on; several screens at once are not supported there yet, recording needs
+Qt's Wayland screen capture, and there is no window picking, cursor image
+or key listening. Windows and macOS build in CI and capture through Qt,
+with their own cursor, key and window code, but have had less testing.
 
 ## Ideas
 

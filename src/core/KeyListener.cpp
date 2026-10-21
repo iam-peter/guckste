@@ -3,7 +3,12 @@
 #include <QGuiApplication>
 #include <QHash>
 
-#ifdef GUCKSTE_HAVE_X11
+#if defined(Q_OS_WIN)
+#include <windows.h>
+#elif defined(Q_OS_MACOS)
+bool macKeyTapAllowed();
+void runMacKeyTap(KeyListener *listener, std::atomic<bool> &stop);
+#elif defined(GUCKSTE_HAVE_X11)
 #include <X11/XKBlib.h>
 #include <X11/Xlib.h>
 #include <X11/extensions/XInput2.h>
@@ -23,10 +28,21 @@ KeyListener::~KeyListener()
 
 bool KeyListener::supported()
 {
-#ifdef GUCKSTE_HAVE_X11
+#if defined(Q_OS_WIN) || defined(Q_OS_MACOS)
+    return true;
+#elif defined(GUCKSTE_HAVE_X11)
     return QGuiApplication::platformName().startsWith(QStringLiteral("xcb"));
 #else
     return false;
+#endif
+}
+
+QString KeyListener::requirement()
+{
+#if defined(Q_OS_MACOS)
+    return tr("Allow Guckste under Accessibility in System Settings → Privacy & Security to show keys.");
+#else
+    return {};
 #endif
 }
 
@@ -34,6 +50,10 @@ bool KeyListener::begin()
 {
     if (!supported() || isRunning())
         return false;
+#if defined(Q_OS_MACOS)
+    if (!macKeyTapAllowed())
+        return false;
+#endif
     m_stop = false;
     start();
     return true;
@@ -97,8 +117,15 @@ QString KeyListener::label(const QString &keyName, bool shift, bool ctrl, bool a
         parts << QStringLiteral("Ctrl");
     if (alt)
         parts << QStringLiteral("Alt");
-    if (super)
+    if (super) {
+#if defined(Q_OS_MACOS)
+        parts << QStringLiteral("Cmd");
+#elif defined(Q_OS_WIN)
+        parts << QStringLiteral("Win");
+#else
         parts << QStringLiteral("Super");
+#endif
+    }
     // Shift shows only where it is not already in the character.
     if (shift && (shortcut || key.size() > 1))
         parts << QStringLiteral("Shift");
@@ -106,9 +133,108 @@ QString KeyListener::label(const QString &keyName, bool shift, bool ctrl, bool a
     return parts.join(u'+');
 }
 
+#if defined(Q_OS_WIN)
+namespace {
+
+KeyListener *s_listener = nullptr;
+
+bool isModifier(DWORD vk)
+{
+    switch (vk) {
+    case VK_SHIFT: case VK_LSHIFT: case VK_RSHIFT:
+    case VK_CONTROL: case VK_LCONTROL: case VK_RCONTROL:
+    case VK_MENU: case VK_LMENU: case VK_RMENU:
+    case VK_LWIN: case VK_RWIN: case VK_CAPITAL:
+        return true;
+    default:
+        return false;
+    }
+}
+
+// Windows' names for keys, in X11's spelling, which label() knows.
+QString winKeyName(const KBDLLHOOKSTRUCT &key)
+{
+    switch (key.vkCode) {
+    case VK_RETURN: return key.flags & LLKHF_EXTENDED ? QStringLiteral("KP_Enter") : QStringLiteral("Return");
+    case VK_TAB: return QStringLiteral("Tab");
+    case VK_SPACE: return QStringLiteral("space");
+    case VK_BACK: return QStringLiteral("BackSpace");
+    case VK_DELETE: return QStringLiteral("Delete");
+    case VK_ESCAPE: return QStringLiteral("Escape");
+    case VK_LEFT: return QStringLiteral("Left");
+    case VK_RIGHT: return QStringLiteral("Right");
+    case VK_UP: return QStringLiteral("Up");
+    case VK_DOWN: return QStringLiteral("Down");
+    case VK_HOME: return QStringLiteral("Home");
+    case VK_END: return QStringLiteral("End");
+    case VK_PRIOR: return QStringLiteral("Prior");
+    case VK_NEXT: return QStringLiteral("Next");
+    case VK_INSERT: return QStringLiteral("Insert");
+    case VK_SNAPSHOT: return QStringLiteral("Print");
+    default: break;
+    }
+    if (key.vkCode >= VK_F1 && key.vkCode <= VK_F24)
+        return QStringLiteral("F%1").arg(key.vkCode - VK_F1 + 1);
+    // What the key types, with the keyboard's state as it is.
+    BYTE state[256] = {};
+    GetKeyboardState(state);
+    wchar_t chars[8] = {};
+    const int length = ToUnicode(key.vkCode, key.scanCode, state, chars, 8, 0);
+    if (length > 0)
+        return QString::fromWCharArray(chars, length);
+    wchar_t name[64] = {};
+    const LONG lparam = LONG(key.scanCode << 16) | (key.flags & LLKHF_EXTENDED ? 1 << 24 : 0);
+    if (GetKeyNameTextW(lparam, name, 64) > 0)
+        return QString::fromWCharArray(name);
+    return {};
+}
+
+LRESULT CALLBACK keyboardHook(int code, WPARAM wparam, LPARAM lparam)
+{
+    if (code == HC_ACTION && (wparam == WM_KEYDOWN || wparam == WM_SYSKEYDOWN) && s_listener) {
+        const auto *key = reinterpret_cast<const KBDLLHOOKSTRUCT *>(lparam);
+        if (!isModifier(key->vkCode)) {
+            const bool shift = GetAsyncKeyState(VK_SHIFT) & 0x8000;
+            const bool ctrl = GetAsyncKeyState(VK_CONTROL) & 0x8000;
+            const bool alt = GetAsyncKeyState(VK_MENU) & 0x8000;
+            const bool win = (GetAsyncKeyState(VK_LWIN) & 0x8000) || (GetAsyncKeyState(VK_RWIN) & 0x8000);
+            QString name = winKeyName(*key);
+            // A control character from ToUnicode under Ctrl is the letter.
+            if (name.size() == 1 && name[0].unicode() < 32)
+                name = QChar(ushort('a' + name[0].unicode() - 1));
+            if (!name.isEmpty())
+                emit s_listener->keyPressed(KeyListener::label(name, shift, ctrl, alt, win));
+        }
+    }
+    return CallNextHookEx(nullptr, code, wparam, lparam);
+}
+
+} // namespace
+#endif
+
 void KeyListener::run()
 {
-#ifdef GUCKSTE_HAVE_X11
+#if defined(Q_OS_WIN)
+    s_listener = this;
+    HHOOK hook = SetWindowsHookExW(WH_KEYBOARD_LL, keyboardHook, GetModuleHandleW(nullptr), 0);
+    if (!hook) {
+        s_listener = nullptr;
+        return;
+    }
+    // The hook needs this thread to pump messages.
+    while (!m_stop) {
+        MSG msg;
+        while (PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE)) {
+            TranslateMessage(&msg);
+            DispatchMessageW(&msg);
+        }
+        Sleep(20);
+    }
+    UnhookWindowsHookEx(hook);
+    s_listener = nullptr;
+#elif defined(Q_OS_MACOS)
+    runMacKeyTap(this, m_stop);
+#elif defined(GUCKSTE_HAVE_X11)
     Display *d = XOpenDisplay(nullptr);
     if (!d)
         return;

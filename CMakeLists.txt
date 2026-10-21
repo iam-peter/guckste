@@ -1,11 +1,14 @@
 cmake_minimum_required(VERSION 3.21)
 
 project(guckste VERSION 0.1.0 LANGUAGES CXX)
+if(APPLE)
+    enable_language(OBJCXX)
+endif()
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-find_package(Qt6 6.9 REQUIRED COMPONENTS Core Gui Widgets Network Multimedia Qml Quick QuickControls2)
+find_package(Qt6 6.9 REQUIRED COMPONENTS Core Gui Widgets Network Multimedia Qml Quick QuickControls2 QuickShapes)
 # Wayland compositors only hand out screenshots through the desktop portal,
 # which is a D-Bus service.
 if(UNIX AND NOT APPLE)

@@ -2,6 +2,7 @@ pragma ComponentBehavior: Bound
 
 import QtQuick
 import QtQuick.Controls
+import QtQuick.Shapes
 import Guckste
 import Guckste.Core
 import Guckste.Ui
@@ -15,6 +16,9 @@ Window {
     required property rect screenGeometry
     // Opened to record: Enter starts the recording instead of copying.
     property bool recordMode: false
+    // The windows on screen, front to back, in capture coordinates: the one
+    // under the pointer is highlighted and a click takes it.
+    property var windowRects: []
 
     x: screenGeometry.x
     y: screenGeometry.y
@@ -35,6 +39,34 @@ Window {
     property rect selection: Qt.rect(0, 0, 0, 0)
     readonly property rect selectionView: Qt.rect(selection.x * zoom, selection.y * zoom,
                                                   selection.width * zoom, selection.height * zoom)
+    // The region of last time, in image pixels, offered until one is picked.
+    readonly property rect lastRegion: {
+        const r = Preferences.lastRegion
+        if (r.width <= 0 || r.height <= 0)
+            return Qt.rect(0, 0, 0, 0)
+        const x = (r.x - screenGeometry.x) * imageScale
+        const y = (r.y - screenGeometry.y) * imageScale
+        const w = r.width * imageScale
+        const h = r.height * imageScale
+        if (x < 0 || y < 0 || x + w > document.imageWidth || y + h > document.imageHeight)
+            return Qt.rect(0, 0, 0, 0)
+        return Qt.rect(x, y, w, h)
+    }
+    readonly property bool lastRegionOffered: !hasSelection && lastRegion.width > 0 && mouse.mode === ""
+
+    // The window under the pointer, in image pixels, while picking.
+    readonly property rect hoveredWindow: {
+        if (hasSelection || mouse.mode !== "" || cursor.x < 0)
+            return Qt.rect(0, 0, 0, 0)
+        const vx = cursor.x / imageScale, vy = cursor.y / imageScale
+        for (let i = 0; i < windowRects.length; ++i) {
+            const r = windowRects[i]
+            if (vx >= r.x && vx < r.x + r.width && vy >= r.y && vy < r.y + r.height)
+                return Qt.rect(r.x * imageScale, r.y * imageScale, r.width * imageScale, r.height * imageScale)
+        }
+        return Qt.rect(0, 0, 0, 0)
+    }
+
     property int tool: Document.Select
     property color toolColor: Preferences.color
     property real size: Preferences.size
@@ -109,6 +141,38 @@ Window {
     function rememberTools() {
         Preferences.color = toolColor
         Preferences.size = size
+        if (hasSelection)
+            Preferences.lastRegion = Qt.rect(Math.round(screenGeometry.x + selection.x / imageScale),
+                                             Math.round(screenGeometry.y + selection.y / imageScale),
+                                             Math.round(selection.width / imageScale),
+                                             Math.round(selection.height / imageScale))
+    }
+
+    function insideLastRegion(p: point): bool {
+        const r = lastRegion
+        return r.width > 0 && p.x >= r.x && p.x < r.x + r.width && p.y >= r.y && p.y < r.y + r.height
+    }
+
+    function onLastBadge(x: real, y: real): bool {
+        if (!lastRegionOffered)
+            return false
+        const b = lastBadge.mapToItem(null, 0, 0)
+        return x >= b.x && x < b.x + lastBadge.width && y >= b.y && y < b.y + lastBadge.height
+    }
+
+    // A click with no drag: the badge of last time's region, the window
+    // under the pointer, or the whole screen.
+    function pickAt(x: real, y: real) {
+        if (onLastBadge(x, y)) {
+            setSelection(lastRegion.x, lastRegion.y, lastRegion.width, lastRegion.height)
+            return
+        }
+        const w = mouse.pressedWindow
+        if (w.width > 0) {
+            setSelection(w.x, w.y, w.width, w.height)
+            return
+        }
+        selectScreenAt(x, y)
     }
 
     function copy() {
@@ -163,7 +227,8 @@ Window {
     }
 
     function cancel() {
-        rememberTools()
+        Preferences.color = toolColor
+        Preferences.size = size
         root.close()
     }
 
@@ -231,6 +296,76 @@ Window {
         color: "transparent"
         border.color: Theme.selectionBorder
         border.width: 1
+    }
+
+    // The window under the pointer: click to take it.
+    Rectangle {
+        visible: root.hoveredWindow.width > 0
+        x: root.hoveredWindow.x * root.zoom
+        y: root.hoveredWindow.y * root.zoom
+        width: root.hoveredWindow.width * root.zoom
+        height: root.hoveredWindow.height * root.zoom
+        color: "#18ffffff"
+        border.color: "#ffffff"
+        border.width: 2
+        Rectangle {
+            x: 4
+            y: 4
+            width: windowLabel.implicitWidth + 12
+            height: windowLabel.implicitHeight + 6
+            radius: 4
+            color: Theme.panel
+            Label {
+                id: windowLabel
+                anchors.centerIn: parent
+                color: Theme.panelText
+                font.pixelSize: 12
+                text: `${Math.round(root.hoveredWindow.width)} × ${Math.round(root.hoveredWindow.height)}`
+            }
+        }
+    }
+
+    // Last time's region: click its badge to take it again.
+    Item {
+        id: ghost
+        visible: root.lastRegionOffered
+        x: root.lastRegion.x * root.zoom
+        y: root.lastRegion.y * root.zoom
+        width: root.lastRegion.width * root.zoom
+        height: root.lastRegion.height * root.zoom
+        Shape {
+            anchors.fill: parent
+            ShapePath {
+                strokeColor: Theme.accent
+                strokeWidth: 2
+                strokeStyle: ShapePath.DashLine
+                dashPattern: [4, 3]
+                fillColor: "transparent"
+                startX: 1; startY: 1
+                PathLine { x: ghost.width - 1; y: 1 }
+                PathLine { x: ghost.width - 1; y: ghost.height - 1 }
+                PathLine { x: 1; y: ghost.height - 1 }
+                PathLine { x: 1; y: 1 }
+            }
+        }
+        Rectangle {
+            id: lastBadge
+            x: 0
+            y: parent.height >= height + 8 ? parent.height - height - 4 : parent.height + 4
+            width: lastLabel.implicitWidth + 12
+            height: lastLabel.implicitHeight + 6
+            radius: 4
+            color: root.cursor.x >= 0 && root.onLastBadge(root.cursor.x * root.zoom, root.cursor.y * root.zoom)
+                   ? Qt.lighter(Theme.accent, 1.2) : Theme.accent
+            Label {
+                id: lastLabel
+                anchors.centerIn: parent
+                color: "#1a1a1a"
+                font.pixelSize: 12
+                font.bold: true
+                text: root.recordMode ? qsTr("Record this region again") : qsTr("Take this region again")
+            }
+        }
     }
 
     // Crosshair while there is no region yet.
@@ -319,6 +454,7 @@ Window {
         // "draw": an annotation; "drag": moving an annotation.
         property string mode: ""
         property point anchor
+        property rect pressedWindow
         property rect startSelection
         property int handle: -1
         property point last
@@ -373,6 +509,7 @@ Window {
             }
             textEntry.commit()
             if (!root.hasSelection) {
+                pressedWindow = root.hoveredWindow
                 mode = "select"
                 anchor = p
                 return
@@ -444,7 +581,7 @@ Window {
             switch (mode) {
             case "select":
                 if (Math.abs(p.x - anchor.x) < 3 && Math.abs(p.y - anchor.y) < 3)
-                    root.selectScreenAt(event.x, event.y)
+                    root.pickAt(event.x, event.y)
                 else
                     root.selectBetween(anchor, p)
                 break

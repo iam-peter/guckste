@@ -6,9 +6,9 @@
 #include <atomic>
 
 // Every key pressed anywhere on the desktop, for showing typed keys in a
-// recording. On X11 the XInput2 extension reports raw key events from the
-// root window; elsewhere there is nothing to listen with and start()
-// returns false.
+// recording: raw key events from XInput2 on X11, a low-level keyboard
+// hook on Windows, an event tap on macOS (with the Accessibility
+// permission). Wayland has nothing to listen with, and supported() says.
 class KeyListener : public QThread
 {
     Q_OBJECT
@@ -18,6 +18,8 @@ public:
     ~KeyListener() override;
 
     static bool supported();
+    // What is missing where supported() is true but begin() fails.
+    static QString requirement();
     bool begin();
     void end();
 
