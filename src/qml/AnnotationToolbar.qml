@@ -52,7 +52,18 @@ ToolBar {
         radius: bar.dark ? 8 : 0
         border.color: bar.dark ? "#55ffffff" : "transparent"
         border.width: bar.dark ? 1 : 0
+
+        // Nothing pressed on the bar reaches what is below it.
+        MouseArea {
+            anchors.fill: parent
+            acceptedButtons: Qt.AllButtons
+            onWheel: wheel => wheel.accepted = true
+        }
     }
+
+    // The row alone sizes the bar.
+    contentWidth: row.implicitWidth
+    contentHeight: row.implicitHeight
 
     ColorDialog {
         id: colorDialog
@@ -61,15 +72,8 @@ ToolBar {
         onAccepted: bar.colorPicked(selectedColor)
     }
 
-    // Nothing pressed on the bar reaches what is below it.
-    MouseArea {
-        anchors.fill: parent
-        z: -1
-        acceptedButtons: Qt.AllButtons
-        onWheel: wheel => wheel.accepted = true
-    }
-
     RowLayout {
+        id: row
         spacing: 2
 
         Repeater {
