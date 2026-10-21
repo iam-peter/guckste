@@ -19,6 +19,10 @@
 #include <QUrl>
 #endif
 
+#ifdef GUCKSTE_HAVE_XSHM
+QImage grabRootWithShm(const QSize &expected);
+#endif
+
 Capture ScreenCapture::grabScreens(bool includeCursor)
 {
     Capture capture;
@@ -31,18 +35,27 @@ Capture ScreenCapture::grabScreens(bool includeCursor)
     // The image is in device pixels, so a HiDPI desktop is captured at
     // full resolution; the overlay maps its logical size onto it.
     const qreal ratio = screens.first()->devicePixelRatio();
-    QImage image(geometry.size() * ratio, QImage::Format_ARGB32_Premultiplied);
-    image.fill(Qt::black);
-    QPainter painter(&image);
-    for (QScreen *screen : screens) {
-        const QPixmap shot = screen->grabWindow(0);
-        if (shot.isNull())
-            continue;
-        const QPoint at = (screen->geometry().topLeft() - geometry.topLeft()) * ratio;
-        painter.drawPixmap(QRect(at, screen->geometry().size() * ratio), shot);
-        capture.ok = true;
+    QImage image;
+#ifdef GUCKSTE_HAVE_XSHM
+    // One X screen holding every monitor, as usual: all of it at once.
+    if (QGuiApplication::platformName() == QStringLiteral("xcb") && ratio == 1 && geometry.topLeft().isNull()) {
+        image = grabRootWithShm(geometry.size());
+        capture.ok = !image.isNull();
     }
-    painter.end();
+#endif
+    if (image.isNull()) {
+        image = QImage(geometry.size() * ratio, QImage::Format_ARGB32_Premultiplied);
+        image.fill(Qt::black);
+        QPainter painter(&image);
+        for (QScreen *screen : screens) {
+            const QPixmap shot = screen->grabWindow(0);
+            if (shot.isNull())
+                continue;
+            const QPoint at = (screen->geometry().topLeft() - geometry.topLeft()) * ratio;
+            painter.drawPixmap(QRect(at, screen->geometry().size() * ratio), shot);
+            capture.ok = true;
+        }
+    }
     if (includeCursor)
         CursorCapture::paint(image, geometry, ratio);
     capture.image = image;

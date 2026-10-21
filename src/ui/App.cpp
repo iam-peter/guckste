@@ -101,6 +101,7 @@ void App::setupTray()
     m_tray = std::make_unique<QSystemTrayIcon>(QIcon(QStringLiteral(":/qt/qml/Guckste/logo/guckste.svg")));
     m_tray->setToolTip(QStringLiteral("Guckste"));
     m_tray->setContextMenu(m_trayMenu.get());
+    connect(m_trayMenu.get(), &QMenu::aboutToHide, this, [this] { m_trayMenuClosed.start(); });
     connect(m_tray.get(), &QSystemTrayIcon::activated, this, [this](QSystemTrayIcon::ActivationReason reason) {
         if (reason == QSystemTrayIcon::Trigger || reason == QSystemTrayIcon::DoubleClick)
             capture();
@@ -207,8 +208,13 @@ void App::openOverlay(bool recordMode, const QRect &presetRegion)
         m_overlay->requestActivate();
         return;
     }
-    // The tray menu may still be on screen; let it go first.
-    QTimer::singleShot(150, this, [this, recordMode, presetRegion] {
+    // Right after picking from the tray menu, the menu may still be on
+    // screen; let it go first. From a shortcut there is nothing to wait for.
+    constexpr int menuFadeMs = 150;
+    int wait = 0;
+    if (m_trayMenuClosed.isValid() && m_trayMenuClosed.elapsed() < menuFadeMs)
+        wait = menuFadeMs - int(m_trayMenuClosed.elapsed());
+    QTimer::singleShot(wait, this, [this, recordMode, presetRegion] {
         ScreenCapture::grab(this, Preferences::instance()->includeCursor(), [this, recordMode, presetRegion](const Capture &capture) {
             if (!capture.ok) {
                 notify(tr("Screenshot failed"), tr("The screen could not be captured."));
@@ -245,6 +251,21 @@ void App::openOverlay(bool recordMode, const QRect &presetRegion)
             holdKeyboard(overlay);
         });
     });
+}
+
+void App::warmUp()
+{
+    // The first overlay spends most of its time loading QML; do that once
+    // at startup, so the first capture opens as fast as the ones after it.
+    auto *document = new Document;
+    QImage image(16, 16, QImage::Format_ARGB32_Premultiplied);
+    image.fill(Qt::black);
+    document->setImage(image);
+    QQuickWindow *overlay = createWindow(QStringLiteral("CaptureOverlay"),
+                                         {{QStringLiteral("document"), QVariant::fromValue(document)},
+                                          {QStringLiteral("screenGeometry"), QRect(0, 0, 16, 16)}});
+    delete overlay;
+    delete document;
 }
 
 void App::captureLater(int seconds, const QRectF &region, bool recordMode)

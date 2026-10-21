@@ -3,6 +3,7 @@
 #include "core/ScreenRecorder.h"
 #include "core/VideoExporter.h"
 
+#include <QElapsedTimer>
 #include <QObject>
 #include <QPointer>
 #include <QQmlEngine>
@@ -34,6 +35,8 @@ public:
     static App *create(QQmlEngine *, QJSEngine *);
 
     void setupTray();
+    // Loads the overlay once while nothing else is going on.
+    void warmUp();
     bool capturing() const { return m_overlay != nullptr; }
     ScreenRecorder *recorder() const { return m_recorder; }
 
@@ -90,6 +93,7 @@ private:
     QQmlEngine *m_engine;
     std::unique_ptr<QSystemTrayIcon> m_tray;
     std::unique_ptr<QMenu> m_trayMenu;
+    QElapsedTimer m_trayMenuClosed;
     QAction *m_launchAtLogin = nullptr;
     QAction *m_recordAction = nullptr;
     ScreenRecorder *m_recorder = nullptr;

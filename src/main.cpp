@@ -9,6 +9,7 @@
 #include <QIcon>
 #include <QQmlApplicationEngine>
 #include <QQuickStyle>
+#include <QTimer>
 #include <QtQml/qqmlextensionplugin.h>
 
 #include <cstdio>
@@ -92,5 +93,7 @@ int main(int argc, char *argv[])
 
     if (!command.isEmpty())
         guckste.handleCommand(command);
+    else
+        QTimer::singleShot(300, &guckste, &App::warmUp);
     return app.exec();
 }

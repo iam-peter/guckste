@@ -47,6 +47,12 @@ elseif(APPLE)
 elseif(X11_FOUND AND X11_Xfixes_FOUND AND X11_Xi_FOUND)
     target_link_libraries(guckste_core PUBLIC X11::X11 X11::Xfixes X11::Xi)
     target_compile_definitions(guckste_core PUBLIC GUCKSTE_HAVE_X11)
+    # Grabbing the screens through shared memory, much faster than Qt.
+    if(X11_Xext_FOUND)
+        target_sources(guckste_core PRIVATE core/ScreenCapture_x11.cpp)
+        target_link_libraries(guckste_core PUBLIC X11::Xext)
+        target_compile_definitions(guckste_core PRIVATE GUCKSTE_HAVE_XSHM)
+    endif()
 endif()
 
 # UI items and the application object, which the UI test loads too.

@@ -45,7 +45,9 @@ Window {
     // (a drag always picks a region, whatever the mode). Kept between
     // screenshots; "all" and "previous" select right away.
     property string pickMode: Preferences.pickMode
-    onPickModeChanged: Preferences.pickMode = pickMode
+    // Only a mode picked here is kept, not the fallback while opening.
+    property bool started: false
+    onPickModeChanged: if (started) Preferences.pickMode = pickMode
     // A region to start with, in screen coordinates: after a timer.
     property rect presetRegion: Qt.rect(0, 0, 0, 0)
 
@@ -249,6 +251,7 @@ Window {
             takeLastRegion()
         else if (pickMode === "previous")
             pickMode = "region"
+        started = true
     }
 
     // A click with no drag takes what the mode highlighted.
