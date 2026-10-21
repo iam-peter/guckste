@@ -39,13 +39,14 @@ int main(int argc, char *argv[])
                        "  gui          Pick a region of the screen to capture (default from a launcher)\n"
                        "  full         Capture all screens to the clipboard and the screenshot folder\n"
                        "  open [file]  Open an image in the editor, asking for one without a file\n"
+                       "  record       Pick a region to record, or stop the recording\n"
                        "  settings     Open the settings\n"
                        "  quit         Quit the running instance\n\n"
                        "Without a command, Guckste starts in the tray. A command goes to the\n"
                        "running instance if there is one."));
     parser.addHelpOption();
     parser.addVersionOption();
-    parser.addPositionalArgument(QStringLiteral("command"), QStringLiteral("gui, full, open, settings or quit"));
+    parser.addPositionalArgument(QStringLiteral("command"), QStringLiteral("gui, full, open, record, settings or quit"));
     parser.addPositionalArgument(QStringLiteral("file"), QStringLiteral("Image to open"), QStringLiteral("[file]"));
     parser.process(app);
 

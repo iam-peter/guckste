@@ -3,14 +3,18 @@
 #include "core/Document.h"
 #include "core/Preferences.h"
 #include "core/ScreenCapture.h"
+#include "core/ScreenRecorder.h"
 
 #include <QAction>
 #include <QApplication>
 #include <QClipboard>
 #include <QFileDialog>
+#include <QDir>
 #include <QFileInfo>
 #include <QIcon>
 #include <QMenu>
+#include <QPainter>
+#include <QPixmap>
 #include <QQmlComponent>
 #include <QQuickWindow>
 #include <QScreen>
@@ -23,9 +27,19 @@ App *s_instance = nullptr;
 }
 
 App::App(QQmlEngine *engine, QObject *parent)
-    : QObject(parent), m_engine(engine)
+    : QObject(parent), m_engine(engine), m_recorder(new ScreenRecorder(this))
 {
     s_instance = this;
+    connect(m_recorder, &ScreenRecorder::stateChanged, this, &App::updateTrayForRecording);
+    connect(m_recorder, &ScreenRecorder::finished, this, [this](const QString &path) {
+        if (m_recordingControls)
+            m_recordingControls->close();
+        if (Preferences::instance()->copyPathAfterSave())
+            QGuiApplication::clipboard()->setText(path);
+        notify(tr("Recording saved"), QFileInfo(path).fileName());
+    });
+    connect(m_recorder, &ScreenRecorder::errorOccurred, this,
+            [this](const QString &message) { notify(tr("Recording failed"), message); });
 }
 
 App::~App()
@@ -55,6 +69,8 @@ void App::setupTray()
     connect(takeShot, &QAction::triggered, this, &App::capture);
     auto *full = m_trayMenu->addAction(tr("Capture All Screens"));
     connect(full, &QAction::triggered, this, &App::captureFull);
+    m_recordAction = m_trayMenu->addAction(tr("Record Screen…"));
+    connect(m_recordAction, &QAction::triggered, this, &App::toggleRecording);
     auto *open = m_trayMenu->addAction(tr("Open Image…"));
     connect(open, &QAction::triggered, this, &App::openImage);
     m_trayMenu->addSeparator();
@@ -96,6 +112,8 @@ void App::handleCommand(const QString &command)
             openImage();
         else
             openEditor(argument);
+    } else if (verb == QStringLiteral("record")) {
+        toggleRecording();
     } else if (verb == QStringLiteral("settings")) {
         openSettings();
     } else if (verb == QStringLiteral("quit")) {
@@ -137,13 +155,24 @@ QQuickWindow *App::createWindow(const QString &type, const QVariantMap &properti
 
 void App::capture()
 {
+    openOverlay(false);
+}
+
+void App::captureForRecording()
+{
+    openOverlay(true);
+}
+
+void App::openOverlay(bool recordMode)
+{
     if (m_overlay) {
+        m_overlay->setProperty("recordMode", recordMode);
         m_overlay->requestActivate();
         return;
     }
     // The tray menu may still be on screen; let it go first.
-    QTimer::singleShot(150, this, [this] {
-        ScreenCapture::grab(this, [this](const Capture &capture) {
+    QTimer::singleShot(150, this, [this, recordMode] {
+        ScreenCapture::grab(this, [this, recordMode](const Capture &capture) {
             if (!capture.ok) {
                 notify(tr("Screenshot failed"), tr("The screen could not be captured."));
                 return;
@@ -152,7 +181,8 @@ void App::capture()
             document->setImage(capture.image);
             QQuickWindow *overlay = createWindow(QStringLiteral("CaptureOverlay"),
                                                  {{QStringLiteral("document"), QVariant::fromValue(document)},
-                                                  {QStringLiteral("screenGeometry"), capture.geometry}});
+                                                  {QStringLiteral("screenGeometry"), capture.geometry},
+                                                  {QStringLiteral("recordMode"), recordMode}});
             if (!overlay) {
                 delete document;
                 return;
@@ -235,6 +265,66 @@ void App::showEditor(Document *document)
     editor->show();
     editor->raise();
     editor->requestActivate();
+}
+
+void App::startRecording(const QRectF &region)
+{
+    if (m_recorder->state() != ScreenRecorder::Idle) {
+        notify(tr("Already recording"), tr("Stop the recording first."));
+        return;
+    }
+    closeOverlay();
+    const QRect rect = region.toAlignedRect();
+    // The overlay has to be off the screen before the first frame.
+    QTimer::singleShot(300, this, [this, rect] {
+        Preferences *prefs = Preferences::instance();
+        const QString path = prefs->nextRecordingPath(ScreenRecorder::suffixFor(ScreenRecorder::bestFormat()));
+        QDir().mkpath(QFileInfo(path).absolutePath());
+        if (!m_recorder->start(rect, path, prefs->frameRate(), prefs->recordMicrophone()))
+            return;
+        m_recordingControls = createWindow(QStringLiteral("RecordingControls"),
+                                           {{QStringLiteral("recorder"), QVariant::fromValue(m_recorder)}});
+        if (m_recordingControls)
+            m_recordingControls->show();
+        if (m_recorder->wholeScreen())
+            notify(tr("Recording the screen"), tr("Stop it from the tray menu or with “guckste record”."));
+    });
+}
+
+void App::stopRecording()
+{
+    m_recorder->stop();
+}
+
+void App::toggleRecording()
+{
+    if (m_recorder->state() == ScreenRecorder::Idle)
+        captureForRecording();
+    else
+        stopRecording();
+}
+
+void App::updateTrayForRecording()
+{
+    const bool recording = m_recorder->state() != ScreenRecorder::Idle;
+    if (m_recordAction)
+        m_recordAction->setText(recording ? tr("Stop Recording") : tr("Record Screen…"));
+    if (!m_tray)
+        return;
+    QIcon icon(QStringLiteral(":/qt/qml/Guckste/logo/guckste.svg"));
+    if (recording) {
+        // The logo with a red dot in its corner.
+        QPixmap pixmap = icon.pixmap(64, 64);
+        QPainter painter(&pixmap);
+        painter.setRenderHint(QPainter::Antialiasing);
+        painter.setPen(QPen(Qt::white, 3));
+        painter.setBrush(QColor(255, 59, 48));
+        painter.drawEllipse(QRect(36, 36, 24, 24));
+        painter.end();
+        icon = QIcon(pixmap);
+    }
+    m_tray->setIcon(icon);
+    m_tray->setToolTip(recording ? tr("Guckste — recording") : QStringLiteral("Guckste"));
 }
 
 void App::openSettings()

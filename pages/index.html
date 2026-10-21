@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Guckste</title>
-<meta name="description" content="A screenshot tool for the tray that annotates screenshots, enlarges them pixel for pixel and puts pixel measurement marks on them.">
+<meta name="description" content="A screenshot and screen recording tool for the tray that annotates screenshots, enlarges them pixel for pixel and puts pixel measurement marks on them.">
 <link rel="icon" href="guckste.svg" type="image/svg+xml">
 <style>
   :root {
@@ -86,9 +86,9 @@
   <header>
     <img src="guckste.svg" alt="">
     <h1>Guckste</h1>
-    <p class="tagline">A screenshot tool in the tray: pick a region, draw on it, copy or save.
-      Its editor enlarges a screenshot pixel for pixel and puts measurement
-      marks on it that count the pixels.</p>
+    <p class="tagline">A screenshot and screen recording tool in the tray: pick a region,
+      draw on it, copy, save or record it. Its editor enlarges a screenshot pixel
+      for pixel and puts measurement marks on it that count the pixels.</p>
     <div class="buttons">
       <a class="button primary" href="https://github.com/iam-peter/guckste/releases/latest">Download</a>
       <a class="button" href="https://github.com/iam-peter/guckste/releases/tag/nightly">Nightly</a>
@@ -107,6 +107,7 @@
     <li>The editor zooms up to 3200 % with every pixel a crisp block and a grid between them.</li>
     <li>Measurement marks count the pixels between two edges, exact along a row or column.</li>
     <li>What is copied or saved is what is on screen: the enlarged image with the marks on top at their size.</li>
+    <li>Shift+Enter records the region to a video instead, with Qt's own FFmpeg; nothing to install.</li>
   </ul>
 
   <h2>Debian and Ubuntu</h2>

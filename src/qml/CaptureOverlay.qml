@@ -13,6 +13,8 @@ Window {
 
     required property Document document
     required property rect screenGeometry
+    // Opened to record: Enter starts the recording instead of copying.
+    property bool recordMode: false
 
     x: screenGeometry.x
     y: screenGeometry.y
@@ -142,6 +144,24 @@ Window {
         App.editInWindow(document, selection)
     }
 
+    function record() {
+        if (!hasSelection)
+            return
+        textEntry.commit()
+        rememberTools()
+        // The region in screen coordinates, as the recorder wants it.
+        App.startRecording(Qt.rect(screenGeometry.x + selection.x / imageScale,
+                                   screenGeometry.y + selection.y / imageScale,
+                                   selection.width / imageScale, selection.height / imageScale))
+    }
+
+    function primaryAction() {
+        if (recordMode)
+            record()
+        else
+            copy()
+    }
+
     function cancel() {
         rememberTools()
         root.close()
@@ -267,7 +287,8 @@ Window {
             anchors.centerIn: parent
             color: Theme.panelText
             font.pixelSize: 12
-            text: `${root.selection.width} × ${root.selection.height}`
+            text: root.recordMode ? qsTr("Record %1 × %2").arg(root.selection.width).arg(root.selection.height)
+                                  : `${root.selection.width} × ${root.selection.height}`
         }
     }
 
@@ -485,6 +506,12 @@ Window {
             onClicked: root.edit()
         }
         IconButton {
+            iconName: "video"
+            tip: root.recordMode ? qsTr("Record this region (Enter)") : qsTr("Record this region (Shift+Enter)")
+            checked: root.recordMode
+            onClicked: root.record()
+        }
+        IconButton {
             iconName: "x"
             tip: qsTr("Cancel (Esc)")
             onClicked: root.cancel()
@@ -492,7 +519,9 @@ Window {
     }
 
     Shortcut { sequence: "Escape"; onActivated: textEntry.visible ? textEntry.cancel() : root.cancel() }
-    Shortcut { sequences: ["Return", "Enter", "Ctrl+C"]; enabled: !textEntry.visible; onActivated: root.copy() }
+    Shortcut { sequences: ["Return", "Enter"]; enabled: !textEntry.visible; onActivated: root.primaryAction() }
+    Shortcut { sequence: "Ctrl+C"; enabled: !textEntry.visible; onActivated: root.copy() }
+    Shortcut { sequences: ["Shift+Return", "Shift+Enter"]; enabled: !textEntry.visible; onActivated: root.record() }
     Shortcut { sequence: "Ctrl+S"; onActivated: root.save() }
     Shortcut { sequence: "Ctrl+Z"; onActivated: root.document.undo() }
     Shortcut { sequences: ["Ctrl+Shift+Z", "Ctrl+Y"]; onActivated: root.document.redo() }

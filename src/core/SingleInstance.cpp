@@ -22,7 +22,10 @@ SingleInstance::SingleInstance(QObject *parent)
 
 QString SingleInstance::serverName()
 {
-    return QStringLiteral("guckste-") + QDir::home().dirName();
+    // GUCKSTE_INSTANCE names a separate instance, for trying a build next
+    // to the one in use.
+    const QString name = qEnvironmentVariable("GUCKSTE_INSTANCE");
+    return QStringLiteral("guckste-") + QDir::home().dirName() + (name.isEmpty() ? QString() : u'-' + name);
 }
 
 bool SingleInstance::sendToRunning(const QString &command)

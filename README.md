@@ -4,13 +4,12 @@
 
 <h1 align="center">Guckste</h1>
 
-A screenshot tool for the tray, written with Qt Quick. It works like
-flameshot: a click on the tray icon or `guckste gui` freezes the screen,
-you drag out a region, draw on it, and copy or save it. On top of that it
-has an editor that enlarges a screenshot pixel for pixel, to draw on it at
-that size and to put measurement marks on it that count the pixels.
-
-Screen recording is planned; screenshots come first.
+A screenshot and screen recording tool for the tray, written with Qt
+Quick. It works like flameshot: a click on the tray icon or `guckste gui`
+freezes the screen, you drag out a region, draw on it, and copy or save it.
+On top of that it has an editor that enlarges a screenshot pixel for pixel,
+to draw on it at that size and to put measurement marks on it that count
+the pixels. The same region picker starts a recording of that region.
 
 ![The editor at 400 % zoom with a measurement mark reading 90 px](docs/screenshots/editor.png)
 
@@ -46,6 +45,8 @@ its command to the running instance:
   Shortcuts).
 - `guckste full` — all screens to the clipboard and the screenshot folder,
   without asking.
+- `guckste record` — pick a region to record, or stop the recording that
+  is running. Bound to a key, one key starts and stops.
 - `guckste open [file]` — the editor, with a file dialog when no file is
   given.
 - `guckste settings`, `guckste quit`.
@@ -67,7 +68,28 @@ appears under it:
   to move it; Delete removes it. Right-click drops the mark being drawn,
   then the selection of a mark, then the region, then the overlay.
 - Enter or Ctrl+C copies the region to the clipboard, Ctrl+S saves it to
-  the screenshot folder, E opens it in the editor, Esc cancels.
+  the screenshot folder, E opens it in the editor, Shift+Enter records it,
+  Esc cancels.
+
+### Recording
+
+Shift+Enter, the camera button, `guckste record` or the tray's Record
+Screen… record the region to a video in the screenshot folder. A red
+frame marks the region and a small panel outside it shows the time, with
+pause and stop; the panel can be dragged anywhere. Neither is in the
+recording. When a whole screen is recorded there is no panel: the tray
+menu's Stop Recording or `guckste record` ends it.
+
+Recording goes through Qt Multimedia and the FFmpeg that comes with Qt, so
+nothing has to be installed. The format is the first of MP4/H.264,
+WebM/VP9, WebM/VP8, MP4/MPEG-4, MKV/MPEG-4 and AVI/MJPEG that encodes on
+the machine, found out by encoding a few frames the first time: Qt's
+FFmpeg has H.264 only through VAAPI or NVENC hardware, and where that is
+missing the file is MP4 with MPEG-4 part 2. The frame rate and whether
+the microphone is recorded are in the settings.
+
+On X11 the region may span screens (Qt captures the whole desktop there).
+Elsewhere it is clipped to the screen under its center.
 
 ### The editor
 
@@ -96,9 +118,10 @@ a name; Save as… (Ctrl+Shift+S) always asks.
 
 The screenshot folder (Pictures/Screenshots by default) and the file name
 pattern (`guckste_%Y-%m-%d_%H-%M-%S`, with strftime's `%Y %m %d %H %M %S
-%b %a`; a number is appended when the name is taken), whether the saved
-file's path goes to the clipboard, the pixel grid, and launching at login,
-which writes `~/.config/autostart/guckste.desktop` on Linux.
+%b %a`; a number is appended when the name is taken; recordings use it
+too), whether the saved file's path goes to the clipboard, the pixel grid,
+the recording frame rate and microphone, and launching at login, which
+writes `~/.config/autostart/guckste.desktop` on Linux.
 
 ## Building
 
@@ -114,7 +137,10 @@ ctest --test-dir build --output-on-failure
 
 `cmake --install build` also installs a desktop file with a launcher action
 for each command, and the icon. `tst_ui` saves screenshots of the windows
-when `GUCKSTE_SCREENSHOT_DIR` is set.
+when `GUCKSTE_SCREENSHOT_DIR` is set, and `tst_recorder` records the
+screen for a few seconds to the file `GUCKSTE_LIVE_RECORD` names. To try a
+build next to the Guckste in use, give it its own instance name:
+`GUCKSTE_INSTANCE=dev ./build/src/guckste`.
 
 ## Layout
 
@@ -123,23 +149,27 @@ when `GUCKSTE_SCREENSHOT_DIR` is set.
   `AnnotationPainter` (draws marks with a QPainter at any scale, the same
   way on screen and into the export), `Document` (the image, its marks,
   undo, rendering and saving), `ScreenCapture` (every screen through Qt,
-  or the desktop portal on Wayland), `SingleInstance` (one Guckste per
-  user, over a local socket), `Preferences` and `FileNaming`.
+  or the desktop portal on Wayland), `ScreenRecorder` (QScreenCapture
+  frames cropped to the region and encoded by QMediaRecorder),
+  `SingleInstance` (one Guckste per user, over a local socket),
+  `Preferences` and `FileNaming`.
 - `src/ui` — `AnnotationLayer`, the item that paints a document's marks
   over the image at the view's zoom, sized to the viewport rather than the
   image; `App`, the tray icon and the windows; the image provider that
   shows documents to QML.
-- `src/qml` — `CaptureOverlay`, `EditorWindow`, `SettingsWindow` and the
-  `AnnotationToolbar` the first two share (QML module `Guckste`).
+- `src/qml` — `CaptureOverlay`, `EditorWindow`, `SettingsWindow`,
+  `RecordingControls` and the `AnnotationToolbar` the first two share (QML
+  module `Guckste`).
 
 Platforms: X11 is where it is used and tested. On Wayland the screenshot
 comes from the desktop portal and the overlay covers the screen it is put
-on; several screens at once are not supported there yet. Windows and
-macOS build and capture through Qt, but have had less testing.
+on; several screens at once are not supported there yet, and recording
+needs Qt's Wayland screen capture. Windows and macOS build and capture
+through Qt, but have had less testing.
 
 ## Ideas
 
-- Screen recording.
+- Recording to GIF, and trimming a recording.
 - Picking a window under the pointer, as flameshot does.
 - A magnifier while picking the region.
 - Pinning a screenshot to the screen.

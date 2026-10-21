@@ -25,7 +25,8 @@ prefix=$root/opt/guckste
 
 mkdir -p "$prefix/lib" "$root/usr/bin" "$root/DEBIAN"
 cp -a "$appdir/usr/bin" "$appdir/usr/plugins" "$appdir/usr/qml" "$appdir/usr/translations" "$prefix/"
-cp -a "$appdir"/usr/lib/libQt6* "$appdir"/usr/lib/libicu* "$prefix/lib/"
+# Qt's own FFmpeg comes along for the recorder
+cp -a "$appdir"/usr/lib/libQt6* "$appdir"/usr/lib/libicu* "$appdir"/usr/lib/libav* "$appdir"/usr/lib/libsw* "$prefix/lib/"
 ln -s /opt/guckste/bin/guckste "$root/usr/bin/guckste"
 install -Dm644 "$logo/guckste.desktop" "$root/usr/share/applications/guckste.desktop"
 install -Dm644 "$logo/guckste.svg" "$root/usr/share/icons/hicolor/scalable/apps/guckste.svg"

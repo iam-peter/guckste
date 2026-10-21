@@ -12,13 +12,14 @@ qt_add_qml_module(guckste_core
         core/ScreenCapture.h core/ScreenCapture.cpp
         core/SingleInstance.h core/SingleInstance.cpp
         core/Preferences.h core/Preferences.cpp
+        core/ScreenRecorder.h core/ScreenRecorder.cpp
 )
 # The generated QML type registrations include headers by file name only.
 target_include_directories(guckste_core
     PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}
     PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/core
 )
-target_link_libraries(guckste_core PUBLIC Qt6::Core Qt6::Gui Qt6::Network Qt6::Qml)
+target_link_libraries(guckste_core PUBLIC Qt6::Core Qt6::Gui Qt6::Network Qt6::Qml Qt6::Multimedia)
 if(TARGET Qt6::DBus)
     target_link_libraries(guckste_core PUBLIC Qt6::DBus)
     target_compile_definitions(guckste_core PUBLIC GUCKSTE_HAVE_DBUS)
@@ -57,6 +58,7 @@ qt_add_qml_module(guckste_qml
         qml/CaptureOverlay.qml
         qml/EditorWindow.qml
         qml/SettingsWindow.qml
+        qml/RecordingControls.qml
         qml/AnnotationToolbar.qml
         qml/TextEntry.qml
         qml/Icons.qml
@@ -65,6 +67,7 @@ qt_add_qml_module(guckste_qml
         qml/Theme.qml
     RESOURCES
         icons/circle.svg
+        icons/circle-stop.svg
         icons/copy.svg
         icons/download.svg
         icons/folder-open.svg
@@ -76,7 +79,9 @@ qt_add_qml_module(guckste_qml
         icons/mouse-pointer-2.svg
         icons/move-up-right.svg
         icons/palette.svg
+        icons/play.svg
         icons/pencil-ruler.svg
+        icons/pause.svg
         icons/pencil.svg
         icons/redo-2.svg
         icons/ruler.svg
@@ -86,6 +91,7 @@ qt_add_qml_module(guckste_qml
         icons/square.svg
         icons/type.svg
         icons/undo-2.svg
+        icons/video.svg
         icons/x.svg
         icons/zoom-in.svg
         icons/zoom-out.svg

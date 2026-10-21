@@ -171,7 +171,26 @@ private slots:
         QTRY_VERIFY(!window->isVisible());
     }
 
+    void recordingControlsLoad()
+    {
+        QQmlComponent component(m_engine);
+        component.loadFromModule("Guckste", "RecordingControls");
+        QVERIFY2(!component.isError(), qPrintable(component.errorString()));
+        QObject *object = component.createWithInitialProperties(
+            {{u"recorder"_s, QVariant::fromValue(m_app->recorder())}});
+        QVERIFY2(object, qPrintable(component.errorString()));
+        auto *window = qobject_cast<QQuickWindow *>(object);
+        QVERIFY(window);
+        window->show();
+        QVERIFY(QTest::qWaitForWindowExposed(window));
+        QVERIFY(QMetaObject::invokeMethod(window, "time", Q_RETURN_ARG(QString, m_time), Q_ARG(int, 65000)));
+        QCOMPARE(m_time, u"01:05"_s);
+        window->close();
+        delete window;
+    }
+
 private:
+    QString m_time;
     QQmlApplicationEngine *m_engine = nullptr;
     App *m_app = nullptr;
     QList<QQmlError> m_warnings;

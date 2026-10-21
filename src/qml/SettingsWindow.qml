@@ -80,6 +80,22 @@ Window {
             checked: Preferences.showGrid
             onToggled: Preferences.showGrid = checked
         }
+        RowLayout {
+            spacing: 8
+            Label { text: qsTr("Recording frame rate") }
+            ComboBox {
+                id: frameRateBox
+                model: [15, 24, 30, 60]
+                currentIndex: Math.max(0, model.indexOf(Preferences.frameRate))
+                onActivated: Preferences.frameRate = model[currentIndex]
+            }
+            Label { text: qsTr("fps") }
+        }
+        CheckBox {
+            text: qsTr("Record the microphone with the screen")
+            checked: Preferences.recordMicrophone
+            onToggled: Preferences.recordMicrophone = checked
+        }
         CheckBox {
             visible: Preferences.launchAtLoginSupported
             text: qsTr("Launch Guckste in the tray at login")
@@ -93,8 +109,9 @@ Window {
             wrapMode: Text.WordWrap
             color: palette.placeholderText
             font.pixelSize: 12
-            text: qsTr("Bind a key to “guckste gui” in your desktop's keyboard settings to take screenshots "
-                       + "with it, like Print. “guckste full” captures all screens without asking.")
+            text: qsTr("Bind keys to “guckste gui” and “guckste record” in your desktop's keyboard settings "
+                       + "to take screenshots and start or stop recordings with them. “guckste full” "
+                       + "captures all screens without asking.")
         }
 
         RowLayout {

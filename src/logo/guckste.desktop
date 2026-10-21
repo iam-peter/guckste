@@ -9,11 +9,15 @@ Terminal=false
 Categories=Graphics;
 Keywords=screenshot;capture;annotate;measure;
 StartupWMClass=guckste
-Actions=Full;Editor;
+Actions=Full;Record;Editor;
 
 [Desktop Action Full]
 Name=Capture All Screens
 Exec=guckste full
+
+[Desktop Action Record]
+Name=Record a Region of the Screen
+Exec=guckste record
 
 [Desktop Action Editor]
 Name=Open an Image in the Editor

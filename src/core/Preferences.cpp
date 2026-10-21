@@ -16,6 +16,8 @@ const auto kCopyPath = "capture/copyPathAfterSave";
 const auto kColor = "tools/color";
 const auto kSize = "tools/size";
 const auto kShowGrid = "editor/showGrid";
+const auto kFrameRate = "recording/frameRate";
+const auto kMicrophone = "recording/microphone";
 const auto kDefaultPattern = "guckste_%Y-%m-%d_%H-%M-%S";
 } // namespace
 
@@ -162,6 +164,37 @@ void Preferences::setCopyPathAfterSave(bool on)
         return;
     m_settings.setValue(kCopyPath, on);
     emit changed();
+}
+
+int Preferences::frameRate() const
+{
+    return qBound(1, m_settings.value(kFrameRate, 30).toInt(), 120);
+}
+
+void Preferences::setFrameRate(int fps)
+{
+    if (fps == frameRate())
+        return;
+    m_settings.setValue(kFrameRate, fps);
+    emit changed();
+}
+
+bool Preferences::recordMicrophone() const
+{
+    return m_settings.value(kMicrophone, false).toBool();
+}
+
+void Preferences::setRecordMicrophone(bool on)
+{
+    if (on == recordMicrophone())
+        return;
+    m_settings.setValue(kMicrophone, on);
+    emit changed();
+}
+
+QString Preferences::nextRecordingPath(const QString &suffix) const
+{
+    return FileNaming::uniquePath(saveDirectory(), filenamePattern(), suffix);
 }
 
 QString Preferences::nextSavePath() const
