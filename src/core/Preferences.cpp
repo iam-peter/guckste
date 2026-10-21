@@ -18,6 +18,8 @@ const auto kSize = "tools/size";
 const auto kShowGrid = "editor/showGrid";
 const auto kFrameRate = "recording/frameRate";
 const auto kMicrophone = "recording/microphone";
+const auto kQuality = "recording/quality";
+const auto kEditAfter = "recording/editAfterRecording";
 const auto kDefaultPattern = "guckste_%Y-%m-%d_%H-%M-%S";
 } // namespace
 
@@ -189,6 +191,32 @@ void Preferences::setRecordMicrophone(bool on)
     if (on == recordMicrophone())
         return;
     m_settings.setValue(kMicrophone, on);
+    emit changed();
+}
+
+int Preferences::recordingQuality() const
+{
+    return qBound(0, m_settings.value(kQuality, 2).toInt(), 3);
+}
+
+void Preferences::setRecordingQuality(int quality)
+{
+    if (quality == recordingQuality())
+        return;
+    m_settings.setValue(kQuality, qBound(0, quality, 3));
+    emit changed();
+}
+
+bool Preferences::editAfterRecording() const
+{
+    return m_settings.value(kEditAfter, true).toBool();
+}
+
+void Preferences::setEditAfterRecording(bool on)
+{
+    if (on == editAfterRecording())
+        return;
+    m_settings.setValue(kEditAfter, on);
     emit changed();
 }
 

@@ -1,10 +1,18 @@
 // The recorder's pieces that need no screen: the format this Qt encodes
 // and the cropping of frames.
 
+#include "core/Encoding.h"
 #include "core/ScreenRecorder.h"
+#include "core/VideoExporter.h"
+#include "core/VideoFrames.h"
 #include "core/SingleInstance.h"
 
 #include <QFileInfo>
+#include <QMediaCaptureSession>
+#include <QMediaPlayer>
+#include <QTemporaryDir>
+#include <QVideoFrameInput>
+#include <QVideoSink>
 #include <QGuiApplication>
 #include <QSignalSpy>
 #include <QMimeType>
@@ -20,15 +28,15 @@ class TestRecorder : public QObject
 private slots:
     void hasAnEncoder()
     {
-        const QMediaFormat format = ScreenRecorder::bestFormat();
+        const QMediaFormat format = Encoding::bestFormat();
         qInfo("Recording as %s, suffix %s", qPrintable(format.mimeType().name()),
-              qPrintable(ScreenRecorder::suffixFor(format)));
+              qPrintable(Encoding::suffixFor(format)));
         QVERIFY(format.videoCodec() != QMediaFormat::VideoCodec::Unspecified);
-        QVERIFY(!ScreenRecorder::suffixFor(format).isEmpty());
+        QVERIFY(!Encoding::suffixFor(format).isEmpty());
         // The chosen one was tried out, so it encodes.
-        QVERIFY(ScreenRecorder::canEncode(format));
+        QVERIFY(Encoding::canEncode(format));
         // And the choice is kept.
-        QCOMPARE(ScreenRecorder::bestFormat().videoCodec(), format.videoCodec());
+        QCOMPARE(Encoding::bestFormat().videoCodec(), format.videoCodec());
     }
 
     void cropsFrames()
@@ -42,7 +50,7 @@ private slots:
         frame.setStartTime(1000);
         frame.setEndTime(2000);
 
-        const QVideoFrame cropped = ScreenRecorder::cropped(frame, QRect(20, 10, 20, 10));
+        const QVideoFrame cropped = VideoFrames::cropped(frame, QRect(20, 10, 20, 10));
         QCOMPARE(cropped.size(), QSize(20, 10));
         QCOMPARE(cropped.pixelFormat(), QVideoFrameFormat::Format_NV12);
         QCOMPARE(cropped.startTime(), 1000);
@@ -56,18 +64,18 @@ private slots:
         QVERIFY2(near(out.pixelColor(19, 9), Qt::red), qPrintable(out.pixelColor(19, 9).name()));
 
         // Beyond the frame: clipped to it, and to even sizes.
-        const QVideoFrame edge = ScreenRecorder::cropped(frame, QRect(50, 40, 30, 30));
+        const QVideoFrame edge = VideoFrames::cropped(frame, QRect(50, 40, 30, 30));
         QCOMPARE(edge.size(), QSize(14, 8));
         QVERIFY2(near(edge.toImage().pixelColor(0, 0), Qt::blue), qPrintable(edge.toImage().pixelColor(0, 0).name()));
 
         // Grey stays grey, white and black keep their ends.
         QImage grey(8, 8, QImage::Format_RGB32);
         grey.fill(QColor(128, 128, 128));
-        QVERIFY(near(ScreenRecorder::toNV12(grey).toImage().pixelColor(3, 3), QColor(128, 128, 128)));
+        QVERIFY(near(VideoFrames::toNV12(grey).toImage().pixelColor(3, 3), QColor(128, 128, 128)));
         grey.fill(Qt::white);
-        QVERIFY(near(ScreenRecorder::toNV12(grey).toImage().pixelColor(3, 3), Qt::white));
+        QVERIFY(near(VideoFrames::toNV12(grey).toImage().pixelColor(3, 3), Qt::white));
         grey.fill(Qt::black);
-        QVERIFY(near(ScreenRecorder::toNV12(grey).toImage().pixelColor(3, 3), Qt::black));
+        QVERIFY(near(VideoFrames::toNV12(grey).toImage().pixelColor(3, 3), Qt::black));
     }
 
     // A real recording of a screen region, when GUCKSTE_LIVE_RECORD names
@@ -81,7 +89,7 @@ private slots:
         QStringList errors;
         connect(&recorder, &ScreenRecorder::errorOccurred, this, [&errors](const QString &m) { errors << m; });
         QSignalSpy finished(&recorder, &ScreenRecorder::finished);
-        const bool started = recorder.start(QRect(100, 100, 640, 360), path, 30, false);
+        const bool started = recorder.start(QRect(100, 100, 640, 360), path, 30, 2, false);
         QVERIFY2(started, qPrintable(errors.join(u"; "_s)));
         QCOMPARE(recorder.state(), ScreenRecorder::Recording);
         QTest::qWait(1500);
@@ -98,6 +106,8 @@ private slots:
         QVERIFY2(errors.isEmpty(), qPrintable(errors.join(u"; "_s)));
         QCOMPARE(finished.count(), 1);
         QVERIFY(QFileInfo(path).size() > 1000);
+        QVERIFY(!recorder.firstFrame().isNull());
+        QCOMPARE(recorder.firstFrame().size(), QSize(640, 360));
         qInfo("Recorded %lld ms to %s (%lld bytes)", recorder.duration(), qPrintable(path), QFileInfo(path).size());
     }
 
@@ -120,12 +130,106 @@ private slots:
         qunsetenv("GUCKSTE_INSTANCE");
     }
 
+    // A short video written from frames, for the exporter.
+    static QString writeVideo(const QString &path, int frames, const QColor &color)
+    {
+        QMediaCaptureSession session;
+        QVideoFrameInput input;
+        QMediaRecorder recorder;
+        session.setVideoFrameInput(&input);
+        session.setRecorder(&recorder);
+        QMediaFormat format = Encoding::bestFormat();
+        format.setAudioCodec(QMediaFormat::AudioCodec::Unspecified);
+        recorder.setMediaFormat(format);
+        recorder.setVideoFrameRate(30);
+        recorder.setVideoResolution(QSize(320, 240));
+        recorder.setOutputLocation(QUrl::fromLocalFile(path));
+        recorder.record();
+        QImage image(320, 240, QImage::Format_RGB32);
+        image.fill(color);
+        for (int i = 0; i < frames; ++i) {
+            QVideoFrame frame = VideoFrames::toNV12(image);
+            frame.setStartTime(i * 33333);
+            frame.setEndTime((i + 1) * 33333);
+            // One at a time: the input refuses a frame while it holds one.
+            if (!QTest::qWaitFor([&input, &frame] { return input.sendVideoFrame(frame); }, 5000))
+                return {};
+        }
+        QTest::qWait(300);
+        recorder.stop();
+        if (!QTest::qWaitFor([&recorder] { return recorder.recorderState() == QMediaRecorder::StoppedState; }, 10000))
+            return {};
+        return recorder.actualLocation().toLocalFile();
+    }
+
+    void exportsWithMarksAndTrim()
+    {
+        QTemporaryDir dir;
+        const QString source = writeVideo(dir.path() + u"/source.mp4"_s, 90, Qt::blue);
+        QVERIFY(QFileInfo(source).size() > 0);
+
+        VideoExporter exporter;
+        QSignalSpy finished(&exporter, &VideoExporter::finished);
+        QSignalSpy failed(&exporter, &VideoExporter::failed);
+        VideoExporter::Job job;
+        job.source = source;
+        job.target = dir.path() + u"/out.mp4"_s;
+        job.startMs = 500;
+        job.endMs = 1500;
+        Annotation rect;
+        rect.type = Annotation::Type::Rectangle;
+        rect.points = {QPointF(40, 40), QPointF(200, 160)};
+        rect.color = Qt::red;
+        rect.size = 6;
+        job.annotations = {rect};
+        QVERIFY(exporter.start(job));
+        QVERIFY(exporter.running());
+        QTRY_VERIFY_WITH_TIMEOUT(finished.count() > 0 || failed.count() > 0, 30000);
+        QVERIFY2(failed.isEmpty(), failed.isEmpty() ? "" : qPrintable(failed.first().first().toString()));
+        QVERIFY(!exporter.running());
+        QVERIFY(QFileInfo(job.target).size() > 0);
+
+        // Read it back: about a second long, with the red frame on it.
+        QMediaPlayer player;
+        QVideoSink sink;
+        player.setVideoSink(&sink);
+        QImage seen;
+        connect(&sink, &QVideoSink::videoFrameChanged, this, [&seen](const QVideoFrame &f) {
+            if (seen.isNull() && f.isValid())
+                seen = f.toImage();
+        });
+        player.setSource(QUrl::fromLocalFile(job.target));
+        QTRY_COMPARE_WITH_TIMEOUT(player.mediaStatus(), QMediaPlayer::LoadedMedia, 10000);
+        QVERIFY2(player.duration() > 800 && player.duration() < 1300,
+                 qPrintable(u"duration %1 of a %2 source"_s.arg(player.duration()).arg(QFileInfo(source).size())));
+        player.play();
+        QTRY_VERIFY_WITH_TIMEOUT(!seen.isNull(), 10000);
+        player.stop();
+        const QColor edge = seen.pixelColor(40, 100);
+        const QColor inside = seen.pixelColor(120, 100);
+        QVERIFY2(edge.red() > 150 && edge.blue() < 100, qPrintable(edge.name()));
+        QVERIFY2(inside.blue() > 150 && inside.red() < 100, qPrintable(inside.name()));
+
+        // Nothing to change: the file is just moved.
+        const QString plain = writeVideo(dir.path() + u"/plain.mp4"_s, 30, Qt::green);
+        VideoExporter mover;
+        QSignalSpy moved(&mover, &VideoExporter::finished);
+        VideoExporter::Job copy;
+        copy.source = plain;
+        copy.target = dir.path() + u"/moved.mp4"_s;
+        copy.moveSource = true;
+        QVERIFY(mover.start(copy));
+        QCOMPARE(moved.count(), 1);
+        QVERIFY(QFileInfo::exists(copy.target));
+        QVERIFY(!QFileInfo::exists(plain));
+    }
+
     void startsOnlyWithAScreen()
     {
         ScreenRecorder recorder;
         QCOMPARE(recorder.state(), ScreenRecorder::Idle);
         // An empty region cannot be recorded.
-        QVERIFY(!recorder.start(QRect(), u"/nonexistent/x.mp4"_s, 30, false));
+        QVERIFY(!recorder.start(QRect(), u"/nonexistent/x.mp4"_s, 30, 2, false));
         QCOMPARE(recorder.state(), ScreenRecorder::Idle);
     }
 };

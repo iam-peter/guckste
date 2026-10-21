@@ -76,11 +76,22 @@ appears under it:
 ### Recording
 
 Shift+Enter, the camera button, `guckste record` or the tray's Record
-Screen… record the region to a video in the screenshot folder. A red
-frame marks the region and a small panel outside it shows the time, with
-pause and stop; the panel can be dragged anywhere. Neither is in the
-recording. When a whole screen is recorded there is no panel: the tray
-menu's Stop Recording or `guckste record` ends it.
+Screen… record the region to a video. A red frame marks the region and a
+small panel outside it shows the time, with pause and stop; the panel can
+be dragged anywhere. Neither is in the recording. When a whole screen is
+recorded there is no panel: the tray menu's Stop Recording or `guckste
+record` ends it.
+
+Stopping opens the recording in the video editor (the settings can send
+it straight to the screenshot folder instead). The same tools draw on
+the video, over its whole length, at the size they will have in the
+file. Space plays and pauses, `,` and `.` step a frame, `[` and `]` set
+the start and the end to keep. Save (Ctrl+S) writes the video to the
+screenshot folder with the marks on every frame and the trimmed parts
+left out, re-encoding it; with no marks and no trim the recording is
+moved there as it is. Closing without saving deletes the recording.
+`guckste open talk.mp4`, or Open in either editor, opens an existing
+video the same way; that file is left alone and the result is a new one.
 
 Recording goes through Qt Multimedia and the FFmpeg that comes with Qt, so
 nothing has to be installed. The format is the first of MP4/H.264,
@@ -89,8 +100,10 @@ the machine, found out by encoding a few frames the first time: Qt's
 FFmpeg has H.264 only through VAAPI or NVENC hardware, and where that is
 missing the file is MP4 with MPEG-4 part 2. Frames are handed to Qt as
 NV12, since from RGB frames Qt may pick a 12-bit format for NVENC that it
-refuses. The frame rate and whether the microphone is recorded are in
-the settings.
+refuses. The settings have the frame rate, a quality level that sets the
+bit rate from the region's size (low to very high: 1, 2, 4 or 8 bits per
+pixel and frame at 30 fps, so 1080p at high is about 8 Mbit/s), and
+whether the microphone is recorded.
 
 On X11 the region may span screens (Qt captures the whole desktop there).
 Elsewhere it is clipped to the screen under its center.
@@ -155,15 +168,19 @@ build next to the Guckste in use, give it its own instance name:
   undo, rendering and saving), `ScreenCapture` (every screen through Qt,
   or the desktop portal on Wayland), `ScreenRecorder` (QScreenCapture
   frames cropped to the region and encoded by QMediaRecorder),
-  `SingleInstance` (one Guckste per user, over a local socket),
-  `Preferences` and `FileNaming`.
+  `VideoExporter` (plays a recording back into a recorder, marks painted
+  on every frame, trim applied), `Encoding` and `VideoFrames` (the format
+  this Qt encodes, bit rates, frames as NV12), `SingleInstance` (one
+  Guckste per user, by a lock file and a local socket), `Preferences`
+  and `FileNaming`.
 - `src/ui` — `AnnotationLayer`, the item that paints a document's marks
   over the image at the view's zoom, sized to the viewport rather than the
   image; `App`, the tray icon and the windows; the image provider that
   shows documents to QML.
-- `src/qml` — `CaptureOverlay`, `EditorWindow`, `SettingsWindow`,
-  `RecordingControls` and the `AnnotationToolbar` the first two share (QML
-  module `Guckste`).
+- `src/qml` — `CaptureOverlay`, `EditorWindow`, `VideoEditorWindow`,
+  `SettingsWindow`, `RecordingControls`, and what the editors share: the
+  `AnnotationToolbar` and the `DrawingArea` with the pointer handling of
+  every tool (QML module `Guckste`).
 
 Platforms: X11 is where it is used and tested. On Wayland the screenshot
 comes from the desktop portal and the overlay covers the screen it is put
@@ -173,7 +190,7 @@ through Qt, but have had less testing.
 
 ## Ideas
 
-- Recording to GIF, and trimming a recording.
+- Recording to GIF, and marks that come and go over time.
 - Picking a window under the pointer, as flameshot does.
 - A magnifier while picking the region.
 - Pinning a screenshot to the screen.

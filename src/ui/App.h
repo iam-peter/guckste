@@ -1,6 +1,7 @@
 #pragma once
 
 #include "core/ScreenRecorder.h"
+#include "core/VideoExporter.h"
 
 #include <QObject>
 #include <QPointer>
@@ -48,6 +49,19 @@ public:
     Q_INVOKABLE void startRecording(const QRectF &region);
     Q_INVOKABLE void stopRecording();
     Q_INVOKABLE void toggleRecording();
+    // The suffix of the video format this machine records.
+    Q_INVOKABLE QString recordingSuffix() const;
+    // Writes `source` to `target` with the document's marks on every frame
+    // and the trim applied; the exporter reports progress and the result.
+    // `moveSource`: the source is a temporary recording that may be moved
+    // into place when nothing changes.
+    Q_INVOKABLE void exportRecording(VideoExporter *exporter, const QString &source, const QString &target,
+                                     Document *document, int startMs, int endMs, bool moveSource);
+    // The video editor on a recording, with `preview` as the frame to draw
+    // over until the player shows the video; a temporary recording is
+    // deleted unless it is saved.
+    void openVideoEditor(const QString &path, const QImage &preview, bool temporary);
+    static bool isVideoFile(const QString &path);
     Q_INVOKABLE void captureFull();
     Q_INVOKABLE void openImage();
     Q_INVOKABLE bool openEditor(const QString &path);

@@ -3,6 +3,7 @@
 #include <QAudioInput>
 #include <QElapsedTimer>
 #include <QMediaCaptureSession>
+#include <QImage>
 #include <QMediaFormat>
 #include <QMediaRecorder>
 #include <QObject>
@@ -53,27 +54,15 @@ public:
     bool canPause() const { return !m_audio; }
 
     // Starts recording `region` (logical screen coordinates, clipped to the
-    // desktop) to `path`, whose suffix should match bestFormat(). False,
-    // with errorOccurred(), when it cannot start.
-    bool start(const QRect &region, const QString &path, int frameRate, bool microphone);
+    // desktop) to `path`, whose suffix should match Encoding::bestFormat().
+    // False, with errorOccurred(), when it cannot start.
+    bool start(const QRect &region, const QString &path, int frameRate, int quality, bool microphone);
     Q_INVOKABLE void pause();
     Q_INVOKABLE void resume();
     Q_INVOKABLE void stop();
 
-    // The first of MP4/H.264, WebM/VP9, WebM/VP8, MP4/MPEG-4, AVI/MJPEG that
-    // this Qt encodes here: tried out once by encoding a few frames, since
-    // the codec table also lists hardware encoders that may not work.
-    static QMediaFormat bestFormat();
-    // Encodes a few frames with the format; false if that fails.
-    static bool canEncode(const QMediaFormat &format);
-    static QString suffixFor(const QMediaFormat &format);
-    // The frame cut down to `rect` (device pixels) as NV12, times kept. NV12
-    // because of how Qt picks the encoder's format: from RGB frames it can
-    // land on a 12-bit format NVENC refuses for H.264, from NV12 it takes
-    // NV12, which every encoder has.
-    static QVideoFrame cropped(const QVideoFrame &frame, const QRect &rect);
-    // An image as an NV12 frame, BT.601 video range.
-    static QVideoFrame toNV12(const QImage &image);
+    // The first frame recorded, for a preview of the file.
+    QImage firstFrame() const { return m_firstFrame; }
 
 signals:
     void stateChanged();
@@ -100,6 +89,8 @@ private:
     bool m_cropKnown = false;
     bool m_wholeScreen = false;
     QString m_outputPath;
+    QImage m_firstFrame;
+    int m_quality = 2;
     bool m_failed = false;
     // Paused time so far, taken off the frames' timestamps.
     qint64 m_pausedTotal = 0;

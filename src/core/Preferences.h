@@ -24,6 +24,8 @@ class Preferences : public QObject
     Q_PROPERTY(bool copyPathAfterSave READ copyPathAfterSave WRITE setCopyPathAfterSave NOTIFY changed)
     Q_PROPERTY(int frameRate READ frameRate WRITE setFrameRate NOTIFY changed)
     Q_PROPERTY(bool recordMicrophone READ recordMicrophone WRITE setRecordMicrophone NOTIFY changed)
+    Q_PROPERTY(int recordingQuality READ recordingQuality WRITE setRecordingQuality NOTIFY changed)
+    Q_PROPERTY(bool editAfterRecording READ editAfterRecording WRITE setEditAfterRecording NOTIFY changed)
 
 public:
     static Preferences *instance();
@@ -49,6 +51,12 @@ public:
     void setFrameRate(int fps);
     bool recordMicrophone() const;
     void setRecordMicrophone(bool on);
+    // 0 low, 1 medium, 2 high, 3 very high: see Encoding::Quality.
+    int recordingQuality() const;
+    void setRecordingQuality(int quality);
+    // Open a recording in the video editor rather than saving it at once.
+    bool editAfterRecording() const;
+    void setEditAfterRecording(bool on);
 
     // Where the next screenshot goes: the directory, the pattern, .png.
     Q_INVOKABLE QString nextSavePath() const;

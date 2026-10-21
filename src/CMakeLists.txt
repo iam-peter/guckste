@@ -13,6 +13,9 @@ qt_add_qml_module(guckste_core
         core/SingleInstance.h core/SingleInstance.cpp
         core/Preferences.h core/Preferences.cpp
         core/ScreenRecorder.h core/ScreenRecorder.cpp
+        core/Encoding.h core/Encoding.cpp
+        core/VideoFrames.h core/VideoFrames.cpp
+        core/VideoExporter.h core/VideoExporter.cpp
 )
 # The generated QML type registrations include headers by file name only.
 target_include_directories(guckste_core
@@ -59,6 +62,8 @@ qt_add_qml_module(guckste_qml
         qml/EditorWindow.qml
         qml/SettingsWindow.qml
         qml/RecordingControls.qml
+        qml/VideoEditorWindow.qml
+        qml/DrawingArea.qml
         qml/AnnotationToolbar.qml
         qml/TextEntry.qml
         qml/Icons.qml
@@ -86,6 +91,10 @@ qt_add_qml_module(guckste_qml
         icons/redo-2.svg
         icons/ruler.svg
         icons/save.svg
+        icons/skip-back.svg
+        icons/skip-forward.svg
+        icons/step-back.svg
+        icons/step-forward.svg
         icons/settings.svg
         icons/slash.svg
         icons/square.svg
@@ -93,6 +102,7 @@ qt_add_qml_module(guckste_qml
         icons/undo-2.svg
         icons/video.svg
         icons/x.svg
+        icons/film.svg
         icons/zoom-in.svg
         icons/zoom-out.svg
         logo/guckste.svg

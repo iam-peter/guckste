@@ -91,6 +91,25 @@ Window {
             }
             Label { text: qsTr("fps") }
         }
+        RowLayout {
+            spacing: 8
+            Label { text: qsTr("Recording quality") }
+            ComboBox {
+                model: [qsTr("Low"), qsTr("Medium"), qsTr("High"), qsTr("Very high")]
+                currentIndex: Preferences.recordingQuality
+                onActivated: Preferences.recordingQuality = currentIndex
+            }
+            Label {
+                text: qsTr("Very high is for crisp text; the file grows with it.")
+                color: palette.placeholderText
+                font.pixelSize: 12
+            }
+        }
+        CheckBox {
+            text: qsTr("Open a recording in the editor to draw on it and trim it before saving")
+            checked: Preferences.editAfterRecording
+            onToggled: Preferences.editAfterRecording = checked
+        }
         CheckBox {
             text: qsTr("Record the microphone with the screen")
             checked: Preferences.recordMicrophone

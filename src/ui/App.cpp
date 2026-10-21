@@ -3,13 +3,16 @@
 #include "core/Document.h"
 #include "core/Preferences.h"
 #include "core/ScreenCapture.h"
+#include "core/Encoding.h"
 #include "core/ScreenRecorder.h"
+#include "core/VideoExporter.h"
 
 #include <QAction>
 #include <QApplication>
 #include <QClipboard>
 #include <QFileDialog>
 #include <QDir>
+#include <QFile>
 #include <QFileInfo>
 #include <QIcon>
 #include <QMenu>
@@ -34,6 +37,10 @@ App::App(QQmlEngine *engine, QObject *parent)
     connect(m_recorder, &ScreenRecorder::finished, this, [this](const QString &path) {
         if (m_recordingControls)
             m_recordingControls->close();
+        if (Preferences::instance()->editAfterRecording()) {
+            openVideoEditor(path, m_recorder->firstFrame(), true);
+            return;
+        }
         if (Preferences::instance()->copyPathAfterSave())
             QGuiApplication::clipboard()->setText(path);
         notify(tr("Recording saved"), QFileInfo(path).fileName());
@@ -223,13 +230,21 @@ void App::openImage()
     const QString start = Preferences::instance()->saveDirectory();
     const QString path = QFileDialog::getOpenFileName(
         nullptr, tr("Open Image"), QFileInfo::exists(start) ? start : QString(),
-        tr("Images (*.png *.jpg *.jpeg *.bmp *.webp *.gif);;All files (*)"));
+        tr("Images and videos (*.png *.jpg *.jpeg *.bmp *.webp *.gif *.mp4 *.webm *.mkv *.avi *.mov);;All files (*)"));
     if (!path.isEmpty())
         openEditor(path);
 }
 
 bool App::openEditor(const QString &path)
 {
+    if (isVideoFile(path)) {
+        if (!QFileInfo::exists(path)) {
+            notify(tr("Could not open video"), path);
+            return false;
+        }
+        openVideoEditor(path, QImage(), false);
+        return true;
+    }
     auto *document = new Document;
     if (!document->load(path)) {
         delete document;
@@ -278,9 +293,15 @@ void App::startRecording(const QRectF &region)
     // The overlay has to be off the screen before the first frame.
     QTimer::singleShot(300, this, [this, rect] {
         Preferences *prefs = Preferences::instance();
-        const QString path = prefs->nextRecordingPath(ScreenRecorder::suffixFor(ScreenRecorder::bestFormat()));
+        // To the editor first, or straight into the folder.
+        QString path = prefs->nextRecordingPath(recordingSuffix());
+        if (prefs->editAfterRecording()) {
+            const QString dir = QStandardPaths::writableLocation(QStandardPaths::TempLocation)
+                                + QStringLiteral("/guckste-recordings");
+            path = dir + u'/' + QFileInfo(path).fileName();
+        }
         QDir().mkpath(QFileInfo(path).absolutePath());
-        if (!m_recorder->start(rect, path, prefs->frameRate(), prefs->recordMicrophone()))
+        if (!m_recorder->start(rect, path, prefs->frameRate(), prefs->recordingQuality(), prefs->recordMicrophone()))
             return;
         m_recordingControls = createWindow(QStringLiteral("RecordingControls"),
                                            {{QStringLiteral("recorder"), QVariant::fromValue(m_recorder)}});
@@ -302,6 +323,67 @@ void App::toggleRecording()
         captureForRecording();
     else
         stopRecording();
+}
+
+QString App::recordingSuffix() const
+{
+    return Encoding::suffixFor(Encoding::bestFormat());
+}
+
+void App::exportRecording(VideoExporter *exporter, const QString &source, const QString &target, Document *document,
+                          int startMs, int endMs, bool moveSource)
+{
+    if (!exporter || !document)
+        return;
+    VideoExporter::Job job;
+    job.moveSource = moveSource;
+    job.source = source;
+    job.target = target;
+    job.startMs = startMs;
+    job.endMs = endMs;
+    job.annotations = document->annotations();
+    job.quality = Preferences::instance()->recordingQuality();
+    exporter->start(job);
+}
+
+bool App::isVideoFile(const QString &path)
+{
+    static const QStringList suffixes{QStringLiteral("mp4"), QStringLiteral("webm"), QStringLiteral("mkv"),
+                                      QStringLiteral("avi"), QStringLiteral("mov"), QStringLiteral("m4v")};
+    return suffixes.contains(QFileInfo(path).suffix().toLower());
+}
+
+void App::openVideoEditor(const QString &path, const QImage &preview, bool temporary)
+{
+    auto *document = new Document;
+    document->setImage(preview);
+    auto *exporter = new VideoExporter;
+    QQuickWindow *editor = createWindow(QStringLiteral("VideoEditorWindow"),
+                                        {{QStringLiteral("document"), QVariant::fromValue(document)},
+                                         {QStringLiteral("sourcePath"), path},
+                                         {QStringLiteral("exporter"), QVariant::fromValue(exporter)},
+                                         {QStringLiteral("temporary"), temporary}});
+    if (!editor) {
+        delete document;
+        delete exporter;
+        if (temporary)
+            notify(tr("Recording saved"), path);
+        return;
+    }
+    document->setParent(editor);
+    exporter->setParent(editor);
+    // A recording that was never saved is not kept.
+    if (temporary) {
+        connect(editor, &QWindow::visibleChanged, editor, [editor, path](bool visible) {
+            if (!visible && !editor->property("saved").toBool())
+                QFile::remove(path);
+        });
+    }
+    m_editors.append(editor);
+    m_editors.removeAll(nullptr);
+    editor->show();
+    editor->raise();
+    editor->requestActivate();
 }
 
 void App::updateTrayForRecording()

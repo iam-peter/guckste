@@ -2,6 +2,7 @@
 // warning. Set GUCKSTE_SCREENSHOT_DIR to also save screenshots of them.
 
 #include "core/Document.h"
+#include "core/VideoExporter.h"
 #include "ui/App.h"
 #include "ui/DocumentImageProvider.h"
 
@@ -187,6 +188,31 @@ private slots:
         QCOMPARE(m_time, u"01:05"_s);
         window->close();
         delete window;
+    }
+
+    void videoEditorLoads()
+    {
+        auto *document = new Document;
+        document->setImage(demoScreen(320, 200));
+        auto *exporter = new VideoExporter;
+        QQmlComponent component(m_engine);
+        component.loadFromModule("Guckste", "VideoEditorWindow");
+        QVERIFY2(!component.isError(), qPrintable(component.errorString()));
+        QObject *object = component.createWithInitialProperties(
+            {{u"document"_s, QVariant::fromValue(document)},
+             {u"sourcePath"_s, QString()},
+             {u"exporter"_s, QVariant::fromValue(exporter)}});
+        QVERIFY2(object, qPrintable(component.errorString()));
+        auto *window = qobject_cast<QQuickWindow *>(object);
+        QVERIFY(window);
+        document->setParent(window);
+        exporter->setParent(window);
+        window->show();
+        QVERIFY(QTest::qWaitForWindowExposed(window));
+        QCOMPARE(window->property("videoWidth").toInt(), 320);
+        window->setProperty("discardConfirmed", true);
+        window->close();
+        QTRY_VERIFY(!window->isVisible());
     }
 
 private:
