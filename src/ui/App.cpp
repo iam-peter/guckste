@@ -78,8 +78,6 @@ void App::setupTray()
     m_trayMenu = std::make_unique<QMenu>();
     auto *takeShot = m_trayMenu->addAction(tr("Take Screenshot"));
     connect(takeShot, &QAction::triggered, this, &App::capture);
-    auto *full = m_trayMenu->addAction(tr("Capture All Screens"));
-    connect(full, &QAction::triggered, this, &App::captureFull);
     m_recordAction = m_trayMenu->addAction(tr("Record Screen…"));
     connect(m_recordAction, &QAction::triggered, this, &App::toggleRecording);
     auto *open = m_trayMenu->addAction(tr("Open Image…"));
@@ -174,7 +172,7 @@ void App::captureForRecording()
     openOverlay(true);
 }
 
-void App::openOverlay(bool recordMode)
+void App::openOverlay(bool recordMode, const QRect &presetRegion)
 {
     if (m_overlay) {
         m_overlay->setProperty("recordMode", recordMode);
@@ -182,8 +180,8 @@ void App::openOverlay(bool recordMode)
         return;
     }
     // The tray menu may still be on screen; let it go first.
-    QTimer::singleShot(150, this, [this, recordMode] {
-        ScreenCapture::grab(this, Preferences::instance()->includeCursor(), [this, recordMode](const Capture &capture) {
+    QTimer::singleShot(150, this, [this, recordMode, presetRegion] {
+        ScreenCapture::grab(this, Preferences::instance()->includeCursor(), [this, recordMode, presetRegion](const Capture &capture) {
             if (!capture.ok) {
                 notify(tr("Screenshot failed"), tr("The screen could not be captured."));
                 return;
@@ -203,7 +201,8 @@ void App::openOverlay(bool recordMode)
                                                   {QStringLiteral("screenGeometry"), capture.geometry},
                                                   {QStringLiteral("recordMode"), recordMode},
                                                   {QStringLiteral("windowRects"), windows},
-                                                  {QStringLiteral("pointerScreen"), pointerScreen}});
+                                                  {QStringLiteral("pointerScreen"), pointerScreen},
+                                                  {QStringLiteral("presetRegion"), QRectF(presetRegion)}});
             if (!overlay) {
                 delete document;
                 return;
@@ -217,6 +216,37 @@ void App::openOverlay(bool recordMode)
             overlay->requestActivate();
         });
     });
+}
+
+void App::captureLater(int seconds, const QRectF &region, bool recordMode)
+{
+    closeOverlay();
+    if (m_countdown)
+        m_countdown->close();
+    const QRect rect = region.toAlignedRect();
+    m_countdownRecordMode = recordMode;
+    QQuickWindow *countdown = createWindow(QStringLiteral("Countdown"),
+                                           {{QStringLiteral("region"), rect},
+                                            {QStringLiteral("seconds"), qMax(1, seconds)}});
+    if (!countdown)
+        return;
+    m_countdown = countdown;
+    connect(countdown, SIGNAL(cancelled()), countdown, SLOT(close()));
+    connect(countdown, SIGNAL(elapsed()), this, SLOT(onCountdownElapsed()));
+    countdown->show();
+}
+
+void App::onCountdownElapsed()
+{
+    QRect region;
+    bool recordMode = false;
+    if (m_countdown) {
+        region = m_countdown->property("region").toRect();
+        m_countdown->close();
+    }
+    recordMode = m_countdownRecordMode;
+    // The countdown has to be off the screen before the capture.
+    QTimer::singleShot(100, this, [this, region, recordMode] { openOverlay(recordMode, region); });
 }
 
 void App::captureFull()

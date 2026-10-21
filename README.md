@@ -34,9 +34,9 @@ Put `nightly` in place of `stable` for the nightly builds.
 
 ## Using it
 
-`guckste` starts in the tray. The tray menu takes a screenshot, captures
-all screens at once, opens an image in the editor, records the screen,
-switches launching at login on and off, and opens the settings. There is
+`guckste` starts in the tray. The tray menu takes a screenshot, opens an
+image in the editor, records the screen, switches launching at login on
+and off, and opens the settings. There is
 one Guckste per user: it holds a lock file, and started again, `guckste`
 hands its command to the running instance and quits (`guckste --replace`
 quits the running one and takes its place, for a new build):
@@ -57,12 +57,13 @@ quits the running one and takes its place, for a new build):
 
 The screen is dimmed and a crosshair follows the pointer with its
 coordinates. A bar at the top of the pointer's screen picks the way:
-**Window** (2) outlines the window under the pointer, frame included,
-and a click takes it; **Screen** (1) does the same with the screen;
-**Region** (3) leaves clicks alone; and **Previous** (4) takes the
-region of last time, drawn dashed, so the same part of the screen can be
-captured or recorded over and over. A drag picks a region in any mode,
-and Ctrl+A takes all screens. Window is the mode to start with. The region can be dragged, resized
+**Region** (3) is for dragging one out; **Window** (2) outlines the
+window under the pointer, frame included, and a click takes it;
+**Screen** (1) does the same with the screen; **All screens** (4, or
+Ctrl+A) takes everything; and **Previous** (5) takes the region of last
+time, drawn dashed, so the same part of the screen can be captured or
+recorded over and over. A drag picks a region in any mode, and the mode
+is kept for the next time. The region can be dragged, resized
 by its handles and nudged with the arrow keys (Shift for 10 px). A toolbar
 appears under it:
 
@@ -77,6 +78,10 @@ appears under it:
 - Enter or Ctrl+C copies the region to the clipboard, Ctrl+S saves it to
   the screenshot folder, E opens it in the editor, Shift+Enter records it,
   Esc cancels.
+- The timer button captures the region again after 3, 5 or 10 seconds:
+  the overlay goes away, a countdown shows beside the region, and the
+  overlay comes back with the region selected and whatever was opened
+  meanwhile, a menu or a tooltip, in the shot.
 
 ### Recording
 

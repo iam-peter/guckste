@@ -45,6 +45,9 @@ public:
     Q_INVOKABLE void capture();
     // Pick a region to record.
     Q_INVOKABLE void captureForRecording();
+    // Counts down beside `region` (screen coordinates), then captures the
+    // screens again and opens the overlay with the region selected.
+    Q_INVOKABLE void captureLater(int seconds, const QRectF &region, bool recordMode);
     // Records a region in screen coordinates, once the overlay is gone.
     Q_INVOKABLE void startRecording(const QRectF &region);
     Q_INVOKABLE void stopRecording();
@@ -75,10 +78,13 @@ public:
 signals:
     void capturingChanged();
 
+private slots:
+    void onCountdownElapsed();
+
 private:
     QQuickWindow *createWindow(const QString &type, const QVariantMap &properties);
     void showEditor(Document *document);
-    void openOverlay(bool recordMode);
+    void openOverlay(bool recordMode, const QRect &presetRegion = QRect());
     void updateTrayForRecording();
 
     QQmlEngine *m_engine;
@@ -88,6 +94,8 @@ private:
     QAction *m_recordAction = nullptr;
     ScreenRecorder *m_recorder = nullptr;
     QPointer<QQuickWindow> m_recordingControls;
+    QPointer<QQuickWindow> m_countdown;
+    bool m_countdownRecordMode = false;
     QPointer<QQuickWindow> m_overlay;
     QPointer<QQuickWindow> m_settings;
     QList<QPointer<QQuickWindow>> m_editors;

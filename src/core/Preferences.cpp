@@ -24,6 +24,7 @@ const auto kEditAfter = "recording/editAfterRecording";
 const auto kIncludeCursor = "capture/includeCursor";
 const auto kShowKeys = "recording/showKeys";
 const auto kLastRegion = "capture/lastRegion";
+const auto kPickMode = "capture/pickMode";
 const auto kDefaultPattern = "guckste_%Y-%m-%d_%H-%M-%S";
 } // namespace
 
@@ -265,6 +266,20 @@ void Preferences::setLastRegion(const QRect &region)
     if (region == lastRegion())
         return;
     m_settings.setValue(kLastRegion, region);
+    emit changed();
+}
+
+QString Preferences::pickMode() const
+{
+    const QString mode = m_settings.value(kPickMode, QStringLiteral("region")).toString();
+    return mode == QStringLiteral("screen") || mode == QStringLiteral("window") ? mode : QStringLiteral("region");
+}
+
+void Preferences::setPickMode(const QString &mode)
+{
+    if (mode == pickMode())
+        return;
+    m_settings.setValue(kPickMode, mode);
     emit changed();
 }
 

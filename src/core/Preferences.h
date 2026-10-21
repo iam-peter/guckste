@@ -31,6 +31,7 @@ class Preferences : public QObject
     Q_PROPERTY(bool showKeys READ showKeys WRITE setShowKeys NOTIFY changed)
     Q_PROPERTY(bool showKeysSupported READ showKeysSupported CONSTANT)
     Q_PROPERTY(QRect lastRegion READ lastRegion WRITE setLastRegion NOTIFY changed)
+    Q_PROPERTY(QString pickMode READ pickMode WRITE setPickMode NOTIFY changed)
 
 public:
     static Preferences *instance();
@@ -73,6 +74,9 @@ public:
     // again next time.
     QRect lastRegion() const;
     void setLastRegion(const QRect &region);
+    // How the overlay picks: "screen", "window" or "region", as last set.
+    QString pickMode() const;
+    void setPickMode(const QString &mode);
 
     // Where the next screenshot goes: the directory, the pattern, .png.
     Q_INVOKABLE QString nextSavePath() const;

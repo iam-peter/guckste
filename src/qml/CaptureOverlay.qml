@@ -23,8 +23,11 @@ Window {
     // coordinates: the mode bar goes there.
     property rect pointerScreen: Qt.rect(0, 0, 0, 0)
     // How a click picks: "screen", "window" or "region" (a drag always
-    // picks a region, whatever the mode).
-    property string pickMode: "window"
+    // picks a region, whatever the mode). Kept between screenshots.
+    property string pickMode: Preferences.pickMode
+    onPickModeChanged: Preferences.pickMode = pickMode
+    // A region to start with, in screen coordinates: after a timer.
+    property rect presetRegion: Qt.rect(0, 0, 0, 0)
 
     x: screenGeometry.x
     y: screenGeometry.y
@@ -176,6 +179,31 @@ Window {
     function takeLastRegion() {
         if (lastRegion.width > 0)
             setSelection(lastRegion.x, lastRegion.y, lastRegion.width, lastRegion.height)
+    }
+
+    function takeAllScreens() {
+        setSelection(0, 0, document.imageWidth, document.imageHeight)
+    }
+
+    // The region captured again after the timer, in screen coordinates.
+    function selectionOnScreen(): rect {
+        return Qt.rect(Math.round(screenGeometry.x + selection.x / imageScale),
+                       Math.round(screenGeometry.y + selection.y / imageScale),
+                       Math.round(selection.width / imageScale), Math.round(selection.height / imageScale))
+    }
+
+    function captureLater(seconds: int) {
+        if (!hasSelection)
+            return
+        textEntry.commit()
+        rememberTools()
+        App.captureLater(seconds, selectionOnScreen(), recordMode)
+    }
+
+    Component.onCompleted: {
+        if (presetRegion.width > 0)
+            setSelection((presetRegion.x - screenGeometry.x) * imageScale, (presetRegion.y - screenGeometry.y) * imageScale,
+                         presetRegion.width * imageScale, presetRegion.height * imageScale)
     }
 
     // A click with no drag takes what the mode highlighted.
@@ -637,9 +665,15 @@ Window {
                 }
             }
             IconButton {
+                iconName: "layout-grid"
+                text: qsTr("All screens")
+                tip: qsTr("Take all screens at once (4)")
+                onClicked: root.takeAllScreens()
+            }
+            IconButton {
                 iconName: "history"
                 text: qsTr("Previous")
-                tip: root.lastRegion.width > 0 ? qsTr("Take the region of last time (4)") : qsTr("No region from last time")
+                tip: root.lastRegion.width > 0 ? qsTr("Take the region of last time (5)") : qsTr("No region from last time")
                 enabled: root.lastRegion.width > 0
                 onClicked: root.takeLastRegion()
             }
@@ -696,6 +730,24 @@ Window {
             onClicked: root.record()
         }
         IconButton {
+            id: timerButton
+            iconName: "timer"
+            tip: qsTr("Capture this region again after a delay, for menus and tooltips")
+            onClicked: timerMenu.open()
+            Menu {
+                id: timerMenu
+                y: timerButton.height
+                Repeater {
+                    model: [3, 5, 10]
+                    MenuItem {
+                        required property int modelData
+                        text: qsTr("In %1 seconds").arg(modelData)
+                        onTriggered: root.captureLater(modelData)
+                    }
+                }
+            }
+        }
+        IconButton {
             iconName: "x"
             tip: qsTr("Cancel (Esc)")
             onClicked: root.cancel()
@@ -718,7 +770,8 @@ Window {
     Shortcut { sequence: "1"; enabled: !textEntry.visible; onActivated: root.pickMode = "screen" }
     Shortcut { sequence: "2"; enabled: !textEntry.visible; onActivated: root.pickMode = "window" }
     Shortcut { sequence: "3"; enabled: !textEntry.visible; onActivated: root.pickMode = "region" }
-    Shortcut { sequence: "4"; enabled: !textEntry.visible; onActivated: root.takeLastRegion() }
+    Shortcut { sequence: "4"; enabled: !textEntry.visible; onActivated: root.takeAllScreens() }
+    Shortcut { sequence: "5"; enabled: !textEntry.visible; onActivated: root.takeLastRegion() }
     Shortcut { sequence: "Left"; enabled: !textEntry.visible; onActivated: root.nudge(-1, 0) }
     Shortcut { sequence: "Right"; enabled: !textEntry.visible; onActivated: root.nudge(1, 0) }
     Shortcut { sequence: "Up"; enabled: !textEntry.visible; onActivated: root.nudge(0, -1) }

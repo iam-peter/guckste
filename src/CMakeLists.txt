@@ -83,6 +83,7 @@ qt_add_qml_module(guckste_qml
         qml/EditorWindow.qml
         qml/SettingsWindow.qml
         qml/RecordingControls.qml
+        qml/Countdown.qml
         qml/VideoEditorWindow.qml
         qml/DrawingArea.qml
         qml/Timeline.qml
@@ -101,6 +102,8 @@ qt_add_qml_module(guckste_qml
         icons/grid-2x2.svg
         icons/grid-3x3.svg
         icons/hash.svg
+        icons/timer.svg
+        icons/layout-grid.svg
         icons/history.svg
         icons/square-dashed.svg
         icons/app-window.svg
