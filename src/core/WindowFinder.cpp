@@ -4,6 +4,7 @@
 #include <QLoggingCategory>
 #include <QRegion>
 #include <QScreen>
+#include <QWindow>
 
 #if defined(Q_OS_WIN)
 #include <dwmapi.h>
@@ -145,4 +146,20 @@ QList<QRect> WindowFinder::windows()
         covered += r;
     }
     return visible;
+}
+
+void WindowFinder::takeFocus(QWindow *window)
+{
+#if defined(GUCKSTE_HAVE_X11)
+    if (auto *x11 = qGuiApp->nativeInterface<QNativeInterface::QX11Application>()) {
+        if (Display *d = x11->display()) {
+            // Qt stamps its request with the time of our last event, and the
+            // server drops it when another client changed the focus since.
+            XSetInputFocus(d, window->winId(), RevertToParent, CurrentTime);
+            XFlush(d);
+            return;
+        }
+    }
+#endif
+    window->requestActivate();
 }

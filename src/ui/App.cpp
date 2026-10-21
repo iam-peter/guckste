@@ -172,6 +172,34 @@ void App::captureForRecording()
     openOverlay(true);
 }
 
+// The overlay bypasses the window manager, so nothing keeps the keyboard
+// on it: any window that asks for focus takes it, and Escape and the
+// shortcuts go dead. Take focus back whenever it goes, and grab the
+// keyboard as flameshot does. The grab fails while the hotkey that
+// launched us is still held by the desktop, so it is retried for a while.
+static void holdKeyboard(QQuickWindow *window)
+{
+    QObject::connect(window, &QWindow::activeChanged, window, [window] {
+        if (window->isActive() || !window->isVisible())
+            return;
+        QTimer::singleShot(50, window, [window] {
+            if (window->isVisible() && !window->isActive())
+                WindowFinder::takeFocus(window);
+        });
+    });
+    QObject::connect(window, &QWindow::visibleChanged, window, [window](bool visible) {
+        if (!visible)
+            window->setKeyboardGrabEnabled(false);
+    });
+    auto *retry = new QTimer(window);
+    retry->setInterval(50);
+    QObject::connect(retry, &QTimer::timeout, window, [window, retry, attempts = 0]() mutable {
+        if (!window->isVisible() || window->setKeyboardGrabEnabled(true) || ++attempts >= 40)
+            retry->stop();
+    });
+    retry->start();
+}
+
 void App::openOverlay(bool recordMode, const QRect &presetRegion)
 {
     if (m_overlay) {
@@ -214,6 +242,7 @@ void App::openOverlay(bool recordMode, const QRect &presetRegion)
             overlay->show();
             overlay->raise();
             overlay->requestActivate();
+            holdKeyboard(overlay);
         });
     });
 }

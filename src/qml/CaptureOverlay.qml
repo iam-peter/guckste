@@ -754,7 +754,17 @@ Window {
         }
     }
 
-    Shortcut { sequence: "Escape"; onActivated: textEntry.visible ? textEntry.cancel() : root.cancel() }
+    Shortcut {
+        sequence: "Escape"
+        onActivated: {
+            if (timerMenu.opened)
+                timerMenu.close()
+            else if (textEntry.visible)
+                textEntry.cancel()
+            else
+                root.cancel()
+        }
+    }
     Shortcut { sequences: ["Return", "Enter"]; enabled: !textEntry.visible; onActivated: root.primaryAction() }
     Shortcut { sequence: "Ctrl+C"; enabled: !textEntry.visible; onActivated: root.copy() }
     Shortcut { sequences: ["Shift+Return", "Shift+Enter"]; enabled: !textEntry.visible; onActivated: root.record() }

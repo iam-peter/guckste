@@ -83,6 +83,7 @@ qt_add_qml_module(guckste_qml
         qml/EditorWindow.qml
         qml/SettingsWindow.qml
         qml/RecordingControls.qml
+        qml/ColorPicker.qml
         qml/Countdown.qml
         qml/VideoEditorWindow.qml
         qml/DrawingArea.qml

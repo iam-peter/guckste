@@ -2,7 +2,6 @@ pragma ComponentBehavior: Bound
 
 import QtQuick
 import QtQuick.Controls
-import QtQuick.Dialogs
 import QtQuick.Layouts
 import Guckste
 import Guckste.Core
@@ -65,13 +64,6 @@ ToolBar {
     contentWidth: row.implicitWidth
     contentHeight: row.implicitHeight
 
-    ColorDialog {
-        id: colorDialog
-        selectedColor: bar.color
-        options: ColorDialog.DontUseNativeDialog
-        onAccepted: bar.colorPicked(selectedColor)
-    }
-
     RowLayout {
         id: row
         spacing: 2
@@ -111,9 +103,28 @@ ToolBar {
             }
         }
         IconButton {
+            id: paletteButton
             iconName: "palette"
             tip: qsTr("Any color…")
-            onClicked: colorDialog.open()
+            checked: colorPicker.opened
+            onClicked: {
+                if (colorPicker.opened) {
+                    colorPicker.close()
+                    return
+                }
+                // Below the button, or above it near the window's bottom.
+                const below = paletteButton.mapToItem(null, 0, paletteButton.height).y
+                const room = paletteButton.Window.height - below
+                colorPicker.y = room >= colorPicker.implicitHeight + 14
+                    ? paletteButton.height + 6 : -colorPicker.implicitHeight - 6
+                colorPicker.open()
+            }
+            ColorPicker {
+                id: colorPicker
+                x: paletteButton.width / 2 - implicitWidth / 2
+                current: bar.color
+                onPicked: picked => bar.colorPicked(picked)
+            }
         }
 
         ToolSeparator {}
