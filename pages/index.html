@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Guckste</title>
-<meta name="description" content="A screenshot and screen recording tool for the tray that annotates screenshots, enlarges them pixel for pixel and puts pixel measurement marks on them.">
+<meta name="description" content="A screenshot and screen recording tool for the tray that annotates screenshots, combines them, enlarges them pixel for pixel and counts the pixels between two edges.">
 <link rel="icon" href="guckste.svg" type="image/svg+xml">
 <style>
   :root {
@@ -76,6 +76,16 @@
   .code { background: var(--code-bg); color: var(--code-fg); border-radius: 10px; }
   .code pre { margin: 0; padding: 14px 16px; overflow-x: auto; font: 13.5px/1.55 ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
 
+  .gallery { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin: 24px 0 8px; }
+  .gallery figure { margin: 0; }
+  .gallery img {
+    display: block; width: 100%; height: auto; border-radius: 10px;
+    aspect-ratio: 16 / 10; object-fit: cover; object-position: top left;
+    border: 1px solid var(--border); box-shadow: 0 12px 30px rgb(0 0 0 / 0.1);
+  }
+  .gallery figcaption { color: var(--muted); font-size: 0.95rem; margin-top: 8px; }
+  @media (max-width: 640px) { .gallery { grid-template-columns: 1fr; } }
+
   ul.features { padding-left: 20px; }
   ul.features li { margin: 6px 0; }
   footer { text-align: center; color: var(--muted); font-size: 0.9rem; padding-top: 48px; }
@@ -87,8 +97,8 @@
     <img src="guckste.svg" alt="">
     <h1>Guckste</h1>
     <p class="tagline">A screenshot and screen recording tool in the tray: pick a region,
-      draw on it, copy, save or record it. Its editor enlarges a screenshot pixel
-      for pixel and puts measurement marks on it that count the pixels.</p>
+      draw on it, copy, save or record it. Its editor combines screenshots,
+      enlarges them pixel for pixel and counts the pixels between two edges.</p>
     <div class="buttons">
       <a class="button primary" href="https://github.com/iam-peter/guckste/releases/latest">Download</a>
       <a class="button" href="https://github.com/iam-peter/guckste/releases/tag/nightly">Nightly</a>
@@ -96,19 +106,31 @@
     </div>
   </header>
 
-  <img class="shot" src="editor.png" width="760" height="540"
-       alt="The editor at 400 % zoom with a measurement mark reading 90 px and a text mark">
+  <img class="shot" src="editor.png" width="1400" height="900"
+       alt="The editor combining a settings window and a terminal into one picture, with an ellipse, arrows, numbered markers, a text, a measurement, a guide and the layer panel">
 
   <h2>What it does</h2>
   <ul class="features">
-    <li>Click the tray icon or bind <code>guckste gui</code> to Print: the screen freezes, drag out a region or click a screen.</li>
-    <li>Draw on it right there: pen, lines, arrows, rectangles, ellipses, marker, text, pixelate, numbered markers.</li>
-    <li>Copy it to the clipboard with Enter, save it with Ctrl+S, or open it in the editor with E.</li>
-    <li>The editor zooms up to 3200 % with every pixel a crisp block and a grid between them.</li>
-    <li>Measurement marks count the pixels between two edges, exact along a row or column.</li>
-    <li>What is copied or saved is what is on screen: the enlarged image with the marks on top at their size.</li>
-    <li>Shift+Enter records the region to a video instead, with Qt's own FFmpeg; nothing to install.</li>
+    <li>Click the tray icon or bind <code>guckste gui</code> to Print: the screens freeze, then pick a region, a window, a screen, all screens, or last time&rsquo;s region again.</li>
+    <li>Draw on it right there: pen, lines, arrows, rectangles, ellipses, marker, text, pixelate and numbered markers. Enter copies, Ctrl+S saves, E opens the editor, and a timer catches menus and tooltips.</li>
+    <li>The editor zooms up to 3200 % with every pixel a crisp block and a grid between them, and measure marks count the pixels between two edges.</li>
+    <li>Combine several screenshots and images into one picture. A layer panel lists every mark, and each stays editable: drag a line&rsquo;s ends or a box&rsquo;s corners, retype a text where it is.</li>
+    <li>Rulers and guides as in GIMP, with marks snapping to the guides and the guides drawn into the export when you want them.</li>
+    <li>Record a region to a video, with the pointer and the keys pressed if you like, then trim it and draw on it before saving. Qt&rsquo;s own FFmpeg does the encoding; nothing to install.</li>
   </ul>
+
+  <div class="gallery">
+    <figure>
+      <img src="overlay.png" width="1280" height="800" loading="lazy"
+           alt="The capture overlay over a desktop, a region picked around a settings window, with a frame, a number, an arrow and a text on it">
+      <figcaption>Pick a region, mark it up, copy it with Enter.</figcaption>
+    </figure>
+    <figure>
+      <img src="measure.png" width="1100" height="720" loading="lazy"
+           alt="The editor at 800 % with the pixel grid on, measuring a label 39 px wide and a gap of 8 px between two fields">
+      <figcaption>Zoom in and count the pixels: a label 39 px wide, fields 8 px apart.</figcaption>
+    </figure>
+  </div>
 
   <h2>Debian and Ubuntu</h2>
   <p>The APT repository brings Guckste with its own Qt, for Ubuntu 22.04,
@@ -124,7 +146,7 @@
 echo "deb [signed-by=/usr/share/keyrings/guckste-archive-keyring.asc] https://iam-peter.github.io/guckste/apt <span id="channel">stable</span> main" | sudo tee /etc/apt/sources.list.d/guckste.list
 sudo apt update &amp;&amp; sudo apt install guckste</pre></div>
   <p class="note">The repository is signed with the key
-    <code>E61A 05C6 0E8A D423 C403 6586 D3D1 B02A 57B5 9B54</code>.</p>
+    <code>7F3A 61EC A86E 691F 1107 E6FF 4E1C ECA0 0A6F DF42</code>.</p>
 
   <h2>Other systems</h2>
   <p>Each <a href="https://github.com/iam-peter/guckste/releases/latest">release</a> has an

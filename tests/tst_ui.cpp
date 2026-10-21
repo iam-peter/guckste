@@ -1,5 +1,6 @@
 // Loads the editor and the capture overlay offscreen and fails on any QML
-// warning. Set GUCKSTE_SCREENSHOT_DIR to also save screenshots of them.
+// warning. Set GUCKSTE_SCREENSHOT_DIR to also save screenshots of them, and
+// GUCKSTE_SITE_SHOTS to stage the screenshots of the README and the site.
 
 #include "core/Document.h"
 #include "core/Preferences.h"
@@ -10,6 +11,7 @@
 #include <QApplication>
 #include <QDir>
 #include <QPainter>
+#include <QPainterPath>
 #include <QQmlApplicationEngine>
 #include <QQuickItem>
 #include <QQuickStyle>
@@ -55,6 +57,103 @@ void saveScreenshot(QQuickWindow *window, const QString &name)
     window->grabWindow().save(dir + u'/' + name + u".png"_s);
 }
 
+
+// A window as a desktop shows it: a title bar above the content.
+QImage framed(const QImage &content, const QString &title)
+{
+    const int bar = 30;
+    QImage image(content.width(), content.height() + bar, QImage::Format_ARGB32_Premultiplied);
+    image.fill(Qt::transparent);
+    QPainter p(&image);
+    p.setRenderHint(QPainter::Antialiasing);
+    QPainterPath shape;
+    shape.addRoundedRect(QRectF(image.rect()), 8, 8);
+    p.setClipPath(shape);
+    p.fillRect(QRect(0, 0, image.width(), bar), QColor(0x2b, 0x2d, 0x33));
+    p.drawImage(0, bar, content);
+    p.setPen(QColor(0xe6, 0xe6, 0xe6));
+    QFont font;
+    font.setPixelSize(13);
+    font.setBold(true);
+    p.setFont(font);
+    p.drawText(QRect(0, 0, image.width(), bar), Qt::AlignCenter, title);
+    const QColor dots[] = {QColor(0xff, 0x5f, 0x57), QColor(0xfe, 0xbc, 0x2e), QColor(0x28, 0xc8, 0x40)};
+    for (int i = 0; i < 3; ++i) {
+        p.setPen(Qt::NoPen);
+        p.setBrush(dots[i]);
+        p.drawEllipse(QPointF(image.width() - 20 - i * 20, bar / 2.0), 6, 6);
+    }
+    return image;
+}
+
+// A terminal with a few commands in it.
+QImage terminal(int w, int h)
+{
+    QImage image(w, h, QImage::Format_ARGB32_Premultiplied);
+    image.fill(QColor(0x16, 0x18, 0x1d));
+    QPainter p(&image);
+    QFont font(u"monospace"_s);
+    font.setStyleHint(QFont::Monospace);
+    font.setPixelSize(14);
+    p.setFont(font);
+    const struct { QString text; QColor color; } lines[] = {
+        {u"$ guckste gui"_s, QColor(0x8a, 0xe2, 0x34)},
+        {u"Guckste is already running; taking a screenshot"_s, QColor(0xd0, 0xd0, 0xd0)},
+        {u"$ guckste record"_s, QColor(0x8a, 0xe2, 0x34)},
+        {u"$ ls ~/Pictures/Screenshots"_s, QColor(0x8a, 0xe2, 0x34)},
+        {u"guckste_2026-10-21_19-28-13.png"_s, QColor(0x72, 0x9f, 0xcf)},
+        {u"guckste_2026-10-21_19-41-55.mp4"_s, QColor(0xad, 0x7f, 0xa8)},
+        {u"guckste_2026-10-21_20-03-07.png"_s, QColor(0x72, 0x9f, 0xcf)},
+        {u"$ "_s, QColor(0x8a, 0xe2, 0x34)},
+    };
+    int y = 26;
+    for (const auto &line : lines) {
+        p.setPen(line.color);
+        p.drawText(16, y, line.text);
+        y += 22;
+    }
+    p.fillRect(QRect(36, y - 37, 9, 17), QColor(0xd0, 0xd0, 0xd0));
+    return image;
+}
+
+// A desktop: a wallpaper, a panel, and windows with shadows.
+QImage desktop(QSize size, const QList<std::pair<QImage, QPoint>> &windows)
+{
+    QImage image(size, QImage::Format_ARGB32_Premultiplied);
+    QPainter p(&image);
+    p.setRenderHint(QPainter::Antialiasing);
+    QLinearGradient sky(0, 0, size.width(), size.height());
+    sky.setColorAt(0, QColor(0x1d, 0x2b, 0x53));
+    sky.setColorAt(0.55, QColor(0x5a, 0x2b, 0x6e));
+    sky.setColorAt(1, QColor(0xc4, 0x4b, 0x52));
+    p.fillRect(image.rect(), sky);
+    for (const auto &[center, radius, color] : {std::tuple{QPointF(size.width() * 0.8, size.height() * 0.25), 380.0, QColor(255, 140, 80, 90)},
+                                                std::tuple{QPointF(size.width() * 0.15, size.height() * 0.85), 420.0, QColor(80, 200, 255, 70)}}) {
+        QRadialGradient glow(center, radius);
+        glow.setColorAt(0, color);
+        glow.setColorAt(1, Qt::transparent);
+        p.fillRect(image.rect(), glow);
+    }
+    p.fillRect(QRect(0, 0, size.width(), 26), QColor(0x12, 0x13, 0x17, 230));
+    p.setPen(QColor(0xe0, 0xe0, 0xe0));
+    QFont font;
+    font.setPixelSize(13);
+    p.setFont(font);
+    p.drawText(QRect(12, 0, 200, 26), Qt::AlignVCenter, u"Applications"_s);
+    p.drawText(QRect(0, 0, size.width() - 12, 26), Qt::AlignVCenter | Qt::AlignRight, u"Tue 21 Oct   21:42"_s);
+    const QImage icon = QImage(u":/qt/qml/Guckste/logo/guckste.svg"_s);
+    if (!icon.isNull())
+        p.drawImage(QRect(size.width() - 160, 4, 18, 18), icon);
+    for (const auto &[window, at] : windows) {
+        for (int i = 6; i >= 1; --i) {
+            p.setPen(Qt::NoPen);
+            p.setBrush(QColor(0, 0, 0, 14));
+            p.drawRoundedRect(QRectF(at + QPoint(0, 6), window.size()).adjusted(-i * 2, -i * 2, i * 2, i * 2), 10 + i, 10 + i);
+        }
+        p.drawImage(at, window);
+    }
+    return image;
+}
 } // namespace
 
 class TestUi : public QObject
@@ -439,6 +538,177 @@ private slots:
         delete window;
 
         prefs->setPickMode(u"region"_s);
+    }
+
+    // The screenshots of the README and the site, staged on a made-up
+    // desktop: the capture overlay, the editor combining two screenshots,
+    // and the editor measuring pixels.
+    void siteScreenshots()
+    {
+        const QString dir = qEnvironmentVariable("GUCKSTE_SITE_SHOTS");
+        if (dir.isEmpty())
+            QSKIP("GUCKSTE_SITE_SHOTS is not set");
+        QDir().mkpath(dir);
+        Preferences::instance()->setPickMode(u"region"_s);
+        Preferences::instance()->setLastRegion(QRect());
+        Preferences::instance()->setSnapToGuides(true);
+        Preferences::instance()->setSaveDirectory(u"/home/you/Pictures/Screenshots"_s);
+
+        // The settings window, as it is.
+        QQmlComponent settingsComponent(m_engine);
+        settingsComponent.loadFromModule("Guckste", "SettingsWindow");
+        auto *settings = qobject_cast<QQuickWindow *>(settingsComponent.create());
+        QVERIFY2(settings, qPrintable(settingsComponent.errorString()));
+        settings->show();
+        QVERIFY(QTest::qWaitForWindowExposed(settings));
+        QTest::qWait(100);
+        const QImage settingsShot = settings->grabWindow();
+        settings->close();
+        delete settings;
+
+        const QImage settingsWindow = framed(settingsShot, u"Guckste Settings"_s);
+        const QImage terminalWindow = framed(terminal(520, 210), u"you@workstation: ~"_s);
+        const QPoint settingsAt(140, 70);
+        const QPoint terminalAt(700, 470);
+        const QImage screen = desktop(QSize(1280, 800), {{settingsWindow, settingsAt}, {terminalWindow, terminalAt}});
+
+        // 1. The overlay: a region over the settings, with marks.
+        {
+            auto *document = new Document;
+            document->setImage(screen);
+            QQmlComponent component(m_engine);
+            component.loadFromModule("Guckste", "CaptureOverlay");
+            auto *window = qobject_cast<QQuickWindow *>(component.createWithInitialProperties(
+                {{u"document"_s, QVariant::fromValue(document)}, {u"screenGeometry"_s, QRect(0, 0, 1280, 800)},
+                 {u"pointerScreen"_s, QRectF(0, 0, 1280, 800)}}));
+            QVERIFY2(window, qPrintable(component.errorString()));
+            document->setParent(window);
+            window->show();
+            QVERIFY(QTest::qWaitForWindowExposed(window));
+            const QRect region(settingsAt.x() - 20, settingsAt.y() + 30, settingsWindow.width() + 200, 330);
+            QMetaObject::invokeMethod(window, "setSelection", Q_ARG(double, region.x()), Q_ARG(double, region.y()),
+                                      Q_ARG(double, region.width()), Q_ARG(double, region.height()));
+            // Around the save folder row, numbered, and pointed at.
+            const QColor red(0xff, 0x3b, 0x30);
+            const int row = settingsAt.y() + 30 + 32;
+            document->beginAnnotation(Document::Rectangle, settingsAt.x() + 12, row - 17, red, 3);
+            document->updateAnnotation(settingsAt.x() + 452, row + 17, false);
+            document->commitAnnotation();
+            document->beginAnnotation(Document::Counter, settingsAt.x() + 12, row - 17, red, 4);
+            document->commitAnnotation();
+            document->beginAnnotation(Document::Arrow, settingsAt.x() + 600, row + 104, red, 4);
+            document->updateAnnotation(settingsAt.x() + 462, row + 12, false);
+            document->commitAnnotation();
+            document->addText(settingsAt.x() + 520, row + 112, u"Screenshots go here"_s, QColor(0xff, 0xcc, 0x00), 22);
+            window->setProperty("tool", int(Document::Arrow));
+            QTest::qWait(150);
+            window->grabWindow().save(dir + u"/overlay.png"_s);
+            window->close();
+            delete window;
+        }
+
+        // 2. The editor: the settings and the terminal combined, marked up,
+        // with layers and a guide.
+        {
+            auto *document = new Document;
+            const QRect settingsPart(settingsAt, settingsWindow.size());
+            document->setImage(screen.copy(settingsPart.adjusted(-16, -16, 16, 16)));
+            QQmlComponent component(m_engine);
+            component.loadFromModule("Guckste", "EditorWindow");
+            auto *window = qobject_cast<QQuickWindow *>(
+                component.createWithInitialProperties({{u"document"_s, QVariant::fromValue(document)}}));
+            QVERIFY2(window, qPrintable(component.errorString()));
+            document->setParent(window);
+            window->resize(1400, 900);
+            window->show();
+            QVERIFY(QTest::qWaitForWindowExposed(window));
+            const QImage term = screen.copy(QRect(terminalAt, terminalWindow.size()).adjusted(-16, -16, 16, 16));
+            const int added = document->addImage(term, document->imageWidth() + 24, 120);
+            // The save folder row circled, the listing it fills pointed at,
+            // the window measured, a guide along the terminal's top.
+            const QColor red(0xff, 0x3b, 0x30);
+            const int width = document->imageWidth();
+            const int row = 16 + 30 + 32;
+            document->beginAnnotation(Document::Ellipse, 22, row - 22, red, 3);
+            document->updateAnnotation(476, row + 22, false);
+            document->commitAnnotation();
+            document->beginAnnotation(Document::Counter, 26, row - 22, red, 4);
+            document->commitAnnotation();
+            document->beginAnnotation(Document::Arrow, width + 70, 230, red, 4);
+            document->updateAnnotation(400, row + 14, false);
+            document->commitAnnotation();
+            document->beginAnnotation(Document::Counter, width + 12, 236, red, 4);
+            document->commitAnnotation();
+            document->addText(width + 40, 70, u"Saved where the setting says"_s, red, 22);
+            document->beginAnnotation(Document::Measure, 16, document->imageHeight() - 6, QColor(0x00, 0x7a, 0xff), 2);
+            document->updateAnnotation(width - 16, document->imageHeight() - 6, true);
+            document->commitAnnotation();
+            document->addGuide(false, 120);
+            document->setSelectedIndex(added);
+            QTest::qWait(50);
+            QMetaObject::invokeMethod(window, "zoomToFit");
+            QTest::qWait(200);
+            window->grabWindow().save(dir + u"/editor.png"_s);
+            window->setProperty("discardConfirmed", true);
+            window->close();
+            delete window;
+        }
+
+        // 3. Measuring: a corner of the settings at 800 %, the pixel grid
+        // on, marks counting the pixels.
+        {
+            auto *document = new Document;
+            document->setImage(settingsShot.copy(QRect(10, 10, 140, 90)));
+            QQmlComponent component(m_engine);
+            component.loadFromModule("Guckste", "EditorWindow");
+            auto *window = qobject_cast<QQuickWindow *>(
+                component.createWithInitialProperties({{u"document"_s, QVariant::fromValue(document)}}));
+            QVERIFY2(window, qPrintable(component.errorString()));
+            document->setParent(window);
+            window->setProperty("showLayers", false);
+            window->setProperty("showGrid", true);
+            window->resize(1100, 720);
+            window->show();
+            QVERIFY(QTest::qWaitForWindowExposed(window));
+            QMetaObject::invokeMethod(window, "zoomAt", Q_ARG(double, 8.0), Q_ARG(double, 0.0), Q_ARG(double, 0.0));
+            // Found in the pixels: the "Save to" label's width, and the gap
+            // between the two fields.
+            const QImage crop = document->image();
+            const auto dark = [&](int x, int y) { return qGray(crop.pixel(x, y)) < 110; };
+            int left = crop.width(), right = -1, bottom = -1;
+            for (int y = 10; y < 32; ++y)
+                for (int x = 0; x < 64; ++x)
+                    if (dark(x, y)) {
+                        left = qMin(left, x);
+                        right = qMax(right, x);
+                        bottom = qMax(bottom, y);
+                    }
+            const auto border = [&](int x, int y) {
+                const int g = qGray(crop.pixel(x, y));
+                return g > 120 && g < 200;
+            };
+            int firstBottom = -1, secondTop = -1;
+            for (int y = 20; y < crop.height() - 1 && secondTop < 0; ++y) {
+                if (firstBottom < 0 && border(110, y) && !border(110, y + 1))
+                    firstBottom = y + 1;
+                else if (firstBottom >= 0 && y > firstBottom + 1 && border(110, y))
+                    secondTop = y;
+            }
+            QVERIFY(right > left && secondTop > firstBottom && firstBottom > 0);
+            const QColor red(0xff, 0x3b, 0x30);
+            document->beginAnnotation(Document::Measure, left, bottom + 4, red, 2);
+            document->updateAnnotation(right + 1, bottom + 4, true);
+            document->commitAnnotation();
+            document->beginAnnotation(Document::Measure, 100, firstBottom, QColor(0x00, 0x7a, 0xff), 2);
+            document->updateAnnotation(100, secondTop, true);
+            document->commitAnnotation();
+            window->setProperty("tool", int(Document::Measure));
+            QTest::qWait(200);
+            window->grabWindow().save(dir + u"/measure.png"_s);
+            window->setProperty("discardConfirmed", true);
+            window->close();
+            delete window;
+        }
     }
 
     void recordingControlsLoad()

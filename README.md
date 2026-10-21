@@ -11,7 +11,7 @@ On top of that it has an editor that enlarges a screenshot pixel for pixel,
 to draw on it at that size and to put measurement marks on it that count
 the pixels. The same region picker starts a recording of that region.
 
-![The editor at 400 % zoom with a measurement mark reading 90 px](docs/screenshots/editor.png)
+![The editor combining a settings window and a terminal into one picture, with marks, a measurement, a guide and the layer panel](docs/screenshots/editor.png)
 
 ## Download
 
@@ -54,6 +54,8 @@ quits the running one and takes its place, for a new build):
 - `guckste settings`, `guckste quit`.
 
 ### Picking a region
+
+![The capture overlay with a region picked around a settings window and marked up](docs/screenshots/overlay.png)
 
 The screen is dimmed and a crosshair follows the pointer with its
 coordinates. A bar at the top of the pointer's screen picks the way:
@@ -150,6 +152,8 @@ and labels it with their count; the ends snap to pixel edges, so a drag
 from the left edge of one pixel to the right edge of another counts both.
 Alt measures at any angle, with the rounded length marked ≈.
 
+![The editor at 800 % measuring a label 39 px wide and a gap of 8 px between two fields](docs/screenshots/measure.png)
+
 Marks stay editable. With the select tool (V), click a mark to select it
 and drag it to move it. Lines, arrows and measurements have a handle on
 each end; rectangles, ellipses, markers and pixelated areas have handles
@@ -210,7 +214,9 @@ ctest --test-dir build --output-on-failure
 
 `cmake --install build` also installs a desktop file with a launcher action
 for each command, and the icon. `tst_ui` saves screenshots of the windows
-when `GUCKSTE_SCREENSHOT_DIR` is set, and `tst_recorder` records the
+when `GUCKSTE_SCREENSHOT_DIR` is set, and stages the screenshots of this
+README and the site on a made-up desktop into the folder
+`GUCKSTE_SITE_SHOTS` names (`docs/screenshots`). `tst_recorder` records the
 screen for a few seconds to the file `GUCKSTE_LIVE_RECORD` names. To try a
 build next to the Guckste in use, give it its own instance name:
 `GUCKSTE_INSTANCE=dev ./build/src/guckste`.
