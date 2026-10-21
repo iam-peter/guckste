@@ -179,7 +179,7 @@ void App::openOverlay(bool recordMode)
     }
     // The tray menu may still be on screen; let it go first.
     QTimer::singleShot(150, this, [this, recordMode] {
-        ScreenCapture::grab(this, [this, recordMode](const Capture &capture) {
+        ScreenCapture::grab(this, Preferences::instance()->includeCursor(), [this, recordMode](const Capture &capture) {
             if (!capture.ok) {
                 notify(tr("Screenshot failed"), tr("The screen could not be captured."));
                 return;
@@ -208,7 +208,7 @@ void App::openOverlay(bool recordMode)
 void App::captureFull()
 {
     QTimer::singleShot(150, this, [this] {
-        ScreenCapture::grab(this, [this](const Capture &capture) {
+        ScreenCapture::grab(this, Preferences::instance()->includeCursor(), [this](const Capture &capture) {
             if (!capture.ok) {
                 notify(tr("Screenshot failed"), tr("The screen could not be captured."));
                 return;
@@ -301,7 +301,13 @@ void App::startRecording(const QRectF &region)
             path = dir + u'/' + QFileInfo(path).fileName();
         }
         QDir().mkpath(QFileInfo(path).absolutePath());
-        if (!m_recorder->start(rect, path, prefs->frameRate(), prefs->recordingQuality(), prefs->recordMicrophone()))
+        ScreenRecorder::Options options;
+        options.frameRate = prefs->frameRate();
+        options.quality = prefs->recordingQuality();
+        options.microphone = prefs->recordMicrophone();
+        options.includeCursor = prefs->includeCursor();
+        options.showKeys = prefs->showKeys();
+        if (!m_recorder->start(rect, path, options))
             return;
         m_recordingControls = createWindow(QStringLiteral("RecordingControls"),
                                            {{QStringLiteral("recorder"), QVariant::fromValue(m_recorder)}});

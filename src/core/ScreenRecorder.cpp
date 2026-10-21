@@ -1,5 +1,6 @@
 #include "ScreenRecorder.h"
 
+#include "CursorCapture.h"
 #include "Encoding.h"
 #include "VideoFrames.h"
 
@@ -7,6 +8,7 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QGuiApplication>
+#include <QPainter>
 #include <QMimeType>
 #include <QTemporaryDir>
 #include <QTimer>
@@ -84,7 +86,7 @@ bool ScreenRecorder::startCapture(QScreen *preferred)
     return false;
 }
 
-bool ScreenRecorder::start(const QRect &region, const QString &path, int frameRate, int quality, bool microphone)
+bool ScreenRecorder::start(const QRect &region, const QString &path, const Options &options)
 {
     if (m_state != Idle) {
         emit errorOccurred(tr("Already recording"));
@@ -109,29 +111,39 @@ bool ScreenRecorder::start(const QRect &region, const QString &path, int frameRa
     m_outputPath = path;
     m_failed = false;
     m_pausedTotal = 0;
-    m_quality = quality;
+    m_options = options;
     m_firstFrame = QImage();
+    m_keys.clear();
+    emit recentKeysChanged();
 
     if (!startCapture(screen))
         return false;
 
-    if (microphone) {
+    if (options.microphone) {
         m_audio = std::make_unique<QAudioInput>();
         m_encodeSession.setAudioInput(m_audio.get());
     } else {
         m_encodeSession.setAudioInput(nullptr);
         m_audio.reset();
     }
+    if (options.showKeys && KeyListener::supported()) {
+        m_keyListener = std::make_unique<KeyListener>();
+        connect(m_keyListener.get(), &KeyListener::keyPressed, this, [this](const QString &label) {
+            m_keys.add(label);
+            emit recentKeysChanged();
+        });
+        m_keyListener->begin();
+    }
     emit outputPathChanged();
     QMediaFormat format = Encoding::bestFormat();
-    if (!microphone)
+    if (!options.microphone)
         format.setAudioCodec(QMediaFormat::AudioCodec::Unspecified);
     m_recorder.setMediaFormat(format);
-    m_recorder.setVideoFrameRate(frameRate);
+    m_recorder.setVideoFrameRate(options.frameRate);
     const QSize size(qRound(m_region.width() * m_devicePixelRatio) & ~1,
                      qRound(m_region.height() * m_devicePixelRatio) & ~1);
     m_recorder.setVideoResolution(size);
-    Encoding::apply(m_recorder, size, frameRate, quality);
+    Encoding::apply(m_recorder, size, options.frameRate, options.quality);
     m_recorder.setOutputLocation(QUrl::fromLocalFile(path));
 
     setState(Recording);
@@ -158,8 +170,19 @@ void ScreenRecorder::onFrame(const QVideoFrame &frame)
                              qRound(local.width() * m_devicePixelRatio), qRound(local.height() * m_devicePixelRatio));
         m_cropKnown = true;
     }
-    // Cropped, and always converted: see VideoFrames.
-    const QImage image = VideoFrames::toImage(frame, m_cropDevice);
+    // Cropped, the pointer and the keys painted in, and converted: see
+    // VideoFrames.
+    QImage image = VideoFrames::toImage(frame, m_cropDevice);
+    if (m_options.includeCursor || !m_keys.isEmpty()) {
+        if (image.format() != QImage::Format_RGB32 && image.format() != QImage::Format_ARGB32_Premultiplied)
+            image = image.convertToFormat(QImage::Format_RGB32);
+        if (m_options.includeCursor)
+            CursorCapture::paint(image, m_region, m_devicePixelRatio);
+        if (!m_keys.isEmpty()) {
+            QPainter painter(&image);
+            m_keys.paint(painter, image.rect());
+        }
+    }
     if (m_firstFrame.isNull())
         m_firstFrame = image.convertToFormat(QImage::Format_RGB32);
     QVideoFrame out = VideoFrames::toNV12(image);
@@ -209,10 +232,19 @@ void ScreenRecorder::stop()
         m_recorder.stop();
 }
 
+QStringList ScreenRecorder::recentKeys() const
+{
+    return m_keys.labels();
+}
+
 void ScreenRecorder::finish()
 {
     m_captureSession.setScreenCapture(nullptr);
     m_screenCapture.reset();
+    if (m_keyListener) {
+        m_keyListener->end();
+        m_keyListener.reset();
+    }
     m_encodeSession.setAudioInput(nullptr);
     m_audio.reset();
     const QString path = m_recorder.actualLocation().isLocalFile() ? m_recorder.actualLocation().toLocalFile()

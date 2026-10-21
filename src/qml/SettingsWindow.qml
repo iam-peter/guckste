@@ -71,6 +71,17 @@ Window {
         }
 
         CheckBox {
+            text: qsTr("Include the pointer in screenshots and recordings")
+            checked: Preferences.includeCursor
+            onToggled: Preferences.includeCursor = checked
+        }
+        CheckBox {
+            visible: Preferences.showKeysSupported
+            text: qsTr("Show the keys pressed along the bottom of recordings")
+            checked: Preferences.showKeys
+            onToggled: Preferences.showKeys = checked
+        }
+        CheckBox {
             text: qsTr("Copy the file path to the clipboard after saving")
             checked: Preferences.copyPathAfterSave
             onToggled: Preferences.copyPathAfterSave = checked

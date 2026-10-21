@@ -1,5 +1,8 @@
 #pragma once
 
+#include "KeyListener.h"
+#include "KeyOverlay.h"
+
 #include <QAudioInput>
 #include <QElapsedTimer>
 #include <QMediaCaptureSession>
@@ -34,6 +37,7 @@ class ScreenRecorder : public QObject
     Q_PROPERTY(bool wholeScreen READ wholeScreen NOTIFY regionChanged)
     Q_PROPERTY(QString outputPath READ outputPath NOTIFY outputPathChanged)
     Q_PROPERTY(bool canPause READ canPause NOTIFY outputPathChanged)
+    Q_PROPERTY(QStringList recentKeys READ recentKeys NOTIFY recentKeysChanged)
 
 public:
     enum State { Idle, Recording, Paused, Stopping };
@@ -56,7 +60,17 @@ public:
     // Starts recording `region` (logical screen coordinates, clipped to the
     // desktop) to `path`, whose suffix should match Encoding::bestFormat().
     // False, with errorOccurred(), when it cannot start.
-    bool start(const QRect &region, const QString &path, int frameRate, int quality, bool microphone);
+    struct Options
+    {
+        int frameRate = 30;
+        int quality = 2;
+        bool microphone = false;
+        bool includeCursor = true;
+        bool showKeys = false;
+    };
+    bool start(const QRect &region, const QString &path, const Options &options);
+    // Keys pressed while recording, for the panel.
+    QStringList recentKeys() const;
     Q_INVOKABLE void pause();
     Q_INVOKABLE void resume();
     Q_INVOKABLE void stop();
@@ -72,6 +86,7 @@ signals:
     // The file is complete.
     void finished(const QString &path);
     void errorOccurred(const QString &message);
+    void recentKeysChanged();
 
 private:
     void setState(State state);
@@ -90,7 +105,7 @@ private:
     bool m_wholeScreen = false;
     QString m_outputPath;
     QImage m_firstFrame;
-    int m_quality = 2;
+    Options m_options;
     bool m_failed = false;
     // Paused time so far, taken off the frames' timestamps.
     qint64 m_pausedTotal = 0;
@@ -104,4 +119,6 @@ private:
     QVideoFrameInput m_input;
     QMediaRecorder m_recorder;
     std::unique_ptr<QAudioInput> m_audio;
+    std::unique_ptr<KeyListener> m_keyListener;
+    KeyOverlay m_keys;
 };

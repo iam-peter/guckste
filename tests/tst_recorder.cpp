@@ -1,7 +1,10 @@
 // The recorder's pieces that need no screen: the format this Qt encodes
 // and the cropping of frames.
 
+#include "core/CursorCapture.h"
 #include "core/Encoding.h"
+#include "core/KeyListener.h"
+#include "core/KeyOverlay.h"
 #include "core/ScreenRecorder.h"
 #include "core/VideoExporter.h"
 #include "core/VideoFrames.h"
@@ -14,6 +17,8 @@
 #include <QVideoFrameInput>
 #include <QVideoSink>
 #include <QGuiApplication>
+#include <QPainter>
+#include <QProcess>
 #include <QSignalSpy>
 #include <QMimeType>
 #include <QTest>
@@ -89,7 +94,7 @@ private slots:
         QStringList errors;
         connect(&recorder, &ScreenRecorder::errorOccurred, this, [&errors](const QString &m) { errors << m; });
         QSignalSpy finished(&recorder, &ScreenRecorder::finished);
-        const bool started = recorder.start(QRect(100, 100, 640, 360), path, 30, 2, false);
+        const bool started = recorder.start(QRect(100, 100, 640, 360), path, ScreenRecorder::Options());
         QVERIFY2(started, qPrintable(errors.join(u"; "_s)));
         QCOMPARE(recorder.state(), ScreenRecorder::Recording);
         QTest::qWait(1500);
@@ -108,6 +113,7 @@ private slots:
         QVERIFY(QFileInfo(path).size() > 1000);
         QVERIFY(!recorder.firstFrame().isNull());
         QCOMPARE(recorder.firstFrame().size(), QSize(640, 360));
+        recorder.firstFrame().save(QFileInfo(path).absolutePath() + u"/live-first.png"_s);
         qInfo("Recorded %lld ms to %s (%lld bytes)", recorder.duration(), qPrintable(path), QFileInfo(path).size());
     }
 
@@ -224,12 +230,86 @@ private slots:
         QVERIFY(!QFileInfo::exists(plain));
     }
 
+    void paintsTheCursor()
+    {
+        CursorCapture::Cursor cursor;
+        cursor.image = QImage(8, 8, QImage::Format_ARGB32_Premultiplied);
+        cursor.image.fill(Qt::red);
+        cursor.hotspot = QPoint(0, 0);
+        cursor.position = QPoint(110, 120);
+        cursor.ok = true;
+        QImage target(100, 100, QImage::Format_RGB32);
+        target.fill(Qt::black);
+        // The target shows the desktop from (100, 100).
+        CursorCapture::paint(target, QRect(100, 100, 100, 100), 1, cursor);
+        QCOMPARE(target.pixelColor(10, 20), QColor(Qt::red));
+        QCOMPARE(target.pixelColor(17, 27), QColor(Qt::red));
+        QCOMPARE(target.pixelColor(18, 28), QColor(Qt::black));
+        // Outside: nothing.
+        cursor.position = QPoint(500, 500);
+        CursorCapture::paint(target, QRect(100, 100, 100, 100), 1, cursor);
+        QCOMPARE(target.pixelColor(50, 50), QColor(Qt::black));
+        // The real one, whatever it is here.
+        QVERIFY(CursorCapture::current().ok);
+    }
+
+    void labelsKeys()
+    {
+        QCOMPARE(KeyListener::label(u"a"_s, false, false, false, false), u"a"_s);
+        QCOMPARE(KeyListener::label(u"A"_s, true, false, false, false), u"A"_s);
+        QCOMPARE(KeyListener::label(u"s"_s, false, true, false, false), u"Ctrl+S"_s);
+        QCOMPARE(KeyListener::label(u"S"_s, true, true, false, false), u"Ctrl+Shift+S"_s);
+        QCOMPARE(KeyListener::label(u"Return"_s, false, false, false, false), u"Enter"_s);
+        QCOMPARE(KeyListener::label(u"BackSpace"_s, false, false, false, false), u"⌫"_s);
+        QCOMPARE(KeyListener::label(u"Tab"_s, true, false, false, false), u"Shift+Tab"_s);
+        QCOMPARE(KeyListener::label(u"KP_Enter"_s, false, false, true, false), u"Alt+Enter"_s);
+        QCOMPARE(KeyListener::label(u"F5"_s, false, false, false, true), u"Super+F5"_s);
+        QCOMPARE(KeyListener::label(u"adiaeresis"_s, false, false, false, false), u"ä"_s);
+
+        KeyOverlay overlay;
+        QVERIFY(overlay.isEmpty());
+        overlay.add(u"Ctrl+S"_s);
+        overlay.add(u"Ctrl+S"_s);
+        overlay.add(u"a"_s);
+        QCOMPARE(overlay.labels(), (QStringList{u"Ctrl+S ×2"_s, u"a"_s}));
+        QImage frame(640, 360, QImage::Format_RGB32);
+        frame.fill(Qt::white);
+        QPainter painter(&frame);
+        overlay.paint(painter, frame.rect());
+        painter.end();
+        // Chips are dark, along the bottom.
+        bool dark = false;
+        for (int x = 0; x < 640 && !dark; ++x)
+            dark = frame.pixelColor(x, 330).lightness() < 100;
+        QVERIFY(dark);
+        QCOMPARE(frame.pixelColor(320, 100), QColor(Qt::white));
+    }
+
+    // The key listener with a real key press, sent with xdotool when
+    // GUCKSTE_LIVE_KEY is set; it needs a display and X11.
+    void listensForKeys()
+    {
+        if (qEnvironmentVariableIsEmpty("GUCKSTE_LIVE_KEY"))
+            QSKIP("Set GUCKSTE_LIVE_KEY to press F13 with xdotool and listen for it");
+        if (!KeyListener::supported())
+            QSKIP("No X11");
+        KeyListener listener;
+        QSignalSpy pressed(&listener, &KeyListener::keyPressed);
+        QVERIFY(listener.begin());
+        QTest::qWait(300);
+        QProcess::execute(u"xdotool"_s, {u"key"_s, u"F13"_s});
+        QTRY_VERIFY_WITH_TIMEOUT(pressed.count() > 0, 3000);
+        QCOMPARE(pressed.first().first().toString(), u"F13"_s);
+        listener.end();
+        QVERIFY(!listener.isRunning());
+    }
+
     void startsOnlyWithAScreen()
     {
         ScreenRecorder recorder;
         QCOMPARE(recorder.state(), ScreenRecorder::Idle);
         // An empty region cannot be recorded.
-        QVERIFY(!recorder.start(QRect(), u"/nonexistent/x.mp4"_s, 30, 2, false));
+        QVERIFY(!recorder.start(QRect(), u"/nonexistent/x.mp4"_s, ScreenRecorder::Options()));
         QCOMPARE(recorder.state(), ScreenRecorder::Idle);
     }
 };

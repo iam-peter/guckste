@@ -16,6 +16,9 @@ qt_add_qml_module(guckste_core
         core/Encoding.h core/Encoding.cpp
         core/VideoFrames.h core/VideoFrames.cpp
         core/VideoExporter.h core/VideoExporter.cpp
+        core/CursorCapture.h core/CursorCapture.cpp
+        core/KeyListener.h core/KeyListener.cpp
+        core/KeyOverlay.h core/KeyOverlay.cpp
 )
 # The generated QML type registrations include headers by file name only.
 target_include_directories(guckste_core
@@ -26,6 +29,11 @@ target_link_libraries(guckste_core PUBLIC Qt6::Core Qt6::Gui Qt6::Network Qt6::Q
 if(TARGET Qt6::DBus)
     target_link_libraries(guckste_core PUBLIC Qt6::DBus)
     target_compile_definitions(guckste_core PUBLIC GUCKSTE_HAVE_DBUS)
+endif()
+# The pointer image (XFixes) and the keys pressed anywhere (XInput2) on X11.
+if(X11_FOUND AND X11_Xfixes_FOUND AND X11_Xi_FOUND)
+    target_link_libraries(guckste_core PUBLIC X11::X11 X11::Xfixes X11::Xi)
+    target_compile_definitions(guckste_core PUBLIC GUCKSTE_HAVE_X11)
 endif()
 
 # UI items and the application object, which the UI test loads too.
@@ -64,6 +72,7 @@ qt_add_qml_module(guckste_qml
         qml/RecordingControls.qml
         qml/VideoEditorWindow.qml
         qml/DrawingArea.qml
+        qml/Timeline.qml
         qml/AnnotationToolbar.qml
         qml/TextEntry.qml
         qml/Icons.qml
@@ -79,6 +88,7 @@ qt_add_qml_module(guckste_qml
         icons/grid-2x2.svg
         icons/grid-3x3.svg
         icons/hash.svg
+        icons/keyboard.svg
         icons/highlighter.svg
         icons/maximize.svg
         icons/mouse-pointer-2.svg

@@ -1,5 +1,7 @@
 #include "ScreenCapture.h"
 
+#include "CursorCapture.h"
+
 #include <QGuiApplication>
 #include <QPainter>
 #include <QPixmap>
@@ -17,7 +19,7 @@
 #include <QUrl>
 #endif
 
-Capture ScreenCapture::grabScreens()
+Capture ScreenCapture::grabScreens(bool includeCursor)
 {
     Capture capture;
     const QList<QScreen *> screens = QGuiApplication::screens();
@@ -41,6 +43,8 @@ Capture ScreenCapture::grabScreens()
         capture.ok = true;
     }
     painter.end();
+    if (includeCursor)
+        CursorCapture::paint(image, geometry, ratio);
     capture.image = image;
     capture.geometry = geometry;
     return capture;
@@ -125,7 +129,7 @@ private:
 } // namespace
 #endif
 
-void ScreenCapture::grab(QObject *context, std::function<void(const Capture &)> done)
+void ScreenCapture::grab(QObject *context, bool includeCursor, std::function<void(const Capture &)> done)
 {
 #ifdef GUCKSTE_HAVE_DBUS
     if (QGuiApplication::platformName().startsWith(QStringLiteral("wayland"))) {
@@ -133,7 +137,7 @@ void ScreenCapture::grab(QObject *context, std::function<void(const Capture &)> 
         return;
     }
 #endif
-    const Capture capture = grabScreens();
+    const Capture capture = grabScreens(includeCursor);
     QTimer::singleShot(0, context, [capture, done = std::move(done)] { done(capture); });
 }
 

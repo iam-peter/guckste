@@ -123,6 +123,16 @@ Window {
                 opacity: 0.7
                 font.pixelSize: 12
             }
+            // The last keys pressed, when they are recorded.
+            Label {
+                visible: root.recorder.recentKeys.length > 0
+                text: root.recorder.recentKeys.slice(-3).join("  ")
+                color: Theme.panelText
+                font.pixelSize: 12
+                font.bold: true
+                Layout.maximumWidth: 180
+                elide: Text.ElideLeft
+            }
             IconButton {
                 iconName: root.paused ? "play" : "pause"
                 tip: root.recorder.canPause ? (root.paused ? qsTr("Resume") : qsTr("Pause"))

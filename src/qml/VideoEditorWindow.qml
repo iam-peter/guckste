@@ -233,50 +233,18 @@ ApplicationWindow {
                     text: `${root.time(player.position)} / ${root.time(root.duration)}`
                 }
 
-                Item {
+                Timeline {
+                    id: timeline
                     Layout.fillWidth: true
-                    Layout.preferredHeight: 24
-                    // The trimmed-away parts, dimmed.
-                    Rectangle {
-                        x: 0
-                        y: 8
-                        height: 8
-                        width: root.duration > 0 ? parent.width * root.trimStart / root.duration : 0
-                        color: "#60000000"
-                    }
-                    Rectangle {
-                        x: root.duration > 0 ? parent.width * root.effectiveEnd / root.duration : parent.width
-                        y: 8
-                        height: 8
-                        width: parent.width - x
-                        color: "#60000000"
-                    }
-                    Slider {
-                        id: positionSlider
-                        anchors.fill: parent
-                        from: 0
-                        to: Math.max(1, root.duration)
-                        value: player.position
-                        onMoved: { player.pause(); player.position = value }
-                    }
+                    duration: root.duration
+                    position: player.position
+                    trimStart: root.trimStart
+                    trimEnd: root.trimEnd
+                    onSeekRequested: ms => { player.pause(); player.position = ms }
+                    onTrimStartRequested: ms => root.trimStart = ms
+                    onTrimEndRequested: ms => root.trimEnd = ms
                 }
 
-                ToolButton {
-                    text: "["
-                    font.bold: true
-                    focusPolicy: Qt.NoFocus
-                    onClicked: root.trimStart = Math.min(player.position, root.effectiveEnd - 100)
-                    ToolTip.text: qsTr("Start the video here ([)")
-                    ToolTip.visible: hovered
-                }
-                ToolButton {
-                    text: "]"
-                    font.bold: true
-                    focusPolicy: Qt.NoFocus
-                    onClicked: root.trimEnd = Math.max(player.position, root.trimStart + 100)
-                    ToolTip.text: qsTr("End the video here (])")
-                    ToolTip.visible: hovered
-                }
                 ToolButton {
                     text: qsTr("Whole")
                     focusPolicy: Qt.NoFocus

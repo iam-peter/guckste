@@ -1,6 +1,7 @@
 #include "Preferences.h"
 
 #include "FileNaming.h"
+#include "KeyListener.h"
 
 #include <QCoreApplication>
 #include <QDir>
@@ -20,6 +21,8 @@ const auto kFrameRate = "recording/frameRate";
 const auto kMicrophone = "recording/microphone";
 const auto kQuality = "recording/quality";
 const auto kEditAfter = "recording/editAfterRecording";
+const auto kIncludeCursor = "capture/includeCursor";
+const auto kShowKeys = "recording/showKeys";
 const auto kDefaultPattern = "guckste_%Y-%m-%d_%H-%M-%S";
 } // namespace
 
@@ -218,6 +221,37 @@ void Preferences::setEditAfterRecording(bool on)
         return;
     m_settings.setValue(kEditAfter, on);
     emit changed();
+}
+
+bool Preferences::includeCursor() const
+{
+    return m_settings.value(kIncludeCursor, true).toBool();
+}
+
+void Preferences::setIncludeCursor(bool on)
+{
+    if (on == includeCursor())
+        return;
+    m_settings.setValue(kIncludeCursor, on);
+    emit changed();
+}
+
+bool Preferences::showKeys() const
+{
+    return m_settings.value(kShowKeys, false).toBool();
+}
+
+void Preferences::setShowKeys(bool on)
+{
+    if (on == showKeys())
+        return;
+    m_settings.setValue(kShowKeys, on);
+    emit changed();
+}
+
+bool Preferences::showKeysSupported() const
+{
+    return KeyListener::supported();
 }
 
 QString Preferences::nextRecordingPath(const QString &suffix) const

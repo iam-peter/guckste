@@ -82,14 +82,22 @@ be dragged anywhere. Neither is in the recording. When a whole screen is
 recorded there is no panel: the tray menu's Stop Recording or `guckste
 record` ends it.
 
+The pointer is in screenshots and recordings unless the settings say
+otherwise; on X11 it is the real cursor image, elsewhere an arrow stands
+in for it. On X11 the settings can also show the keys pressed while
+recording as chips along the bottom of the video, `Ctrl+Shift+S` and the
+like, each for a few seconds, and in the panel. Every key on the desktop
+is listened to while that is on, so leave it off when typing a password.
+
 Stopping opens the recording in the video editor (the settings can send
 it straight to the screenshot folder instead). The same tools draw on
 the video, over its whole length, at the size they will have in the
 file. Space plays and pauses, `,` and `.` step a frame, `[` and `]` set
-the start and the end to keep. Save (Ctrl+S) writes the video to the
-screenshot folder with the marks on every frame and the trimmed parts
-left out, re-encoding it; with no marks and no trim the recording is
-moved there as it is. Closing without saving deletes the recording.
+the start and the end to keep, which the handles on the timeline do as
+well; click or drag the timeline to scrub. Save (Ctrl+S) writes the video
+to the screenshot folder with the marks on every frame and the trimmed
+parts left out, re-encoding it; with no marks and no trim the recording
+is moved there as it is. Closing without saving deletes the recording.
 `guckste open talk.mp4`, or Open in either editor, opens an existing
 video the same way; that file is left alone and the result is a new one.
 
@@ -143,7 +151,9 @@ writes `~/.config/autostart/guckste.desktop` on Linux.
 ## Building
 
 Requires Qt ≥ 6.9 and CMake ≥ 3.21. On Linux QtDBus is used, if found, to
-ask the desktop portal for screenshots on Wayland.
+ask the desktop portal for screenshots on Wayland, and the X11 libraries
+Xfixes and Xi (libxfixes-dev, libxi-dev) for the pointer image and the
+keys pressed.
 
 ```bash
 cmake -B build -G Ninja -DCMAKE_PREFIX_PATH=$HOME/Qt/6.12.0/gcc_64
@@ -178,9 +188,9 @@ build next to the Guckste in use, give it its own instance name:
   image; `App`, the tray icon and the windows; the image provider that
   shows documents to QML.
 - `src/qml` — `CaptureOverlay`, `EditorWindow`, `VideoEditorWindow`,
-  `SettingsWindow`, `RecordingControls`, and what the editors share: the
-  `AnnotationToolbar` and the `DrawingArea` with the pointer handling of
-  every tool (QML module `Guckste`).
+  `SettingsWindow`, `RecordingControls`, the `Timeline`, and what the
+  editors share: the `AnnotationToolbar` and the `DrawingArea` with the
+  pointer handling of every tool (QML module `Guckste`).
 
 Platforms: X11 is where it is used and tested. On Wayland the screenshot
 comes from the desktop portal and the overlay covers the screen it is put

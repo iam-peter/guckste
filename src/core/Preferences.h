@@ -26,6 +26,9 @@ class Preferences : public QObject
     Q_PROPERTY(bool recordMicrophone READ recordMicrophone WRITE setRecordMicrophone NOTIFY changed)
     Q_PROPERTY(int recordingQuality READ recordingQuality WRITE setRecordingQuality NOTIFY changed)
     Q_PROPERTY(bool editAfterRecording READ editAfterRecording WRITE setEditAfterRecording NOTIFY changed)
+    Q_PROPERTY(bool includeCursor READ includeCursor WRITE setIncludeCursor NOTIFY changed)
+    Q_PROPERTY(bool showKeys READ showKeys WRITE setShowKeys NOTIFY changed)
+    Q_PROPERTY(bool showKeysSupported READ showKeysSupported CONSTANT)
 
 public:
     static Preferences *instance();
@@ -57,6 +60,13 @@ public:
     // Open a recording in the video editor rather than saving it at once.
     bool editAfterRecording() const;
     void setEditAfterRecording(bool on);
+    // The pointer in screenshots and recordings.
+    bool includeCursor() const;
+    void setIncludeCursor(bool on);
+    // Keys pressed, shown along the bottom of recordings.
+    bool showKeys() const;
+    void setShowKeys(bool on);
+    bool showKeysSupported() const;
 
     // Where the next screenshot goes: the directory, the pattern, .png.
     Q_INVOKABLE QString nextSavePath() const;

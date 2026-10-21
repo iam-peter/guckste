@@ -10,6 +10,7 @@ find_package(Qt6 6.9 REQUIRED COMPONENTS Core Gui Widgets Network Multimedia Qml
 # which is a D-Bus service.
 if(UNIX AND NOT APPLE)
     find_package(Qt6 COMPONENTS DBus)
+    find_package(X11 COMPONENTS Xfixes Xi)
 endif()
 qt_standard_project_setup(REQUIRES 6.8)
 # An installed guckste finds the Qt it was built against.
