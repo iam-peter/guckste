@@ -1,0 +1,269 @@
+#include "App.h"
+
+#include "core/Document.h"
+#include "core/Preferences.h"
+#include "core/ScreenCapture.h"
+
+#include <QAction>
+#include <QApplication>
+#include <QClipboard>
+#include <QFileDialog>
+#include <QFileInfo>
+#include <QIcon>
+#include <QMenu>
+#include <QQmlComponent>
+#include <QQuickWindow>
+#include <QScreen>
+#include <QStandardPaths>
+#include <QSystemTrayIcon>
+#include <QTimer>
+
+namespace {
+App *s_instance = nullptr;
+}
+
+App::App(QQmlEngine *engine, QObject *parent)
+    : QObject(parent), m_engine(engine)
+{
+    s_instance = this;
+}
+
+App::~App()
+{
+    s_instance = nullptr;
+}
+
+App *App::instance()
+{
+    return s_instance;
+}
+
+App *App::create(QQmlEngine *, QJSEngine *)
+{
+    QQmlEngine::setObjectOwnership(s_instance, QQmlEngine::CppOwnership);
+    return s_instance;
+}
+
+void App::setupTray()
+{
+    if (!QSystemTrayIcon::isSystemTrayAvailable()) {
+        qWarning("No system tray: start captures with 'guckste gui'");
+        return;
+    }
+    m_trayMenu = std::make_unique<QMenu>();
+    auto *takeShot = m_trayMenu->addAction(tr("Take Screenshot"));
+    connect(takeShot, &QAction::triggered, this, &App::capture);
+    auto *full = m_trayMenu->addAction(tr("Capture All Screens"));
+    connect(full, &QAction::triggered, this, &App::captureFull);
+    auto *open = m_trayMenu->addAction(tr("Open Image…"));
+    connect(open, &QAction::triggered, this, &App::openImage);
+    m_trayMenu->addSeparator();
+    if (Preferences::instance()->launchAtLoginSupported()) {
+        m_launchAtLogin = m_trayMenu->addAction(tr("Launch at Login"));
+        m_launchAtLogin->setCheckable(true);
+        m_launchAtLogin->setChecked(Preferences::instance()->launchAtLogin());
+        connect(m_launchAtLogin, &QAction::toggled, Preferences::instance(), &Preferences::setLaunchAtLogin);
+        connect(Preferences::instance(), &Preferences::changed, this, [this] {
+            m_launchAtLogin->setChecked(Preferences::instance()->launchAtLogin());
+        });
+    }
+    auto *settings = m_trayMenu->addAction(tr("Settings…"));
+    connect(settings, &QAction::triggered, this, &App::openSettings);
+    m_trayMenu->addSeparator();
+    auto *quit = m_trayMenu->addAction(tr("Quit"));
+    connect(quit, &QAction::triggered, this, &App::quit);
+
+    m_tray = std::make_unique<QSystemTrayIcon>(QIcon(QStringLiteral(":/qt/qml/Guckste/logo/guckste.svg")));
+    m_tray->setToolTip(QStringLiteral("Guckste"));
+    m_tray->setContextMenu(m_trayMenu.get());
+    connect(m_tray.get(), &QSystemTrayIcon::activated, this, [this](QSystemTrayIcon::ActivationReason reason) {
+        if (reason == QSystemTrayIcon::Trigger || reason == QSystemTrayIcon::DoubleClick)
+            capture();
+    });
+    m_tray->show();
+}
+
+void App::handleCommand(const QString &command)
+{
+    const QString verb = command.section(u' ', 0, 0);
+    const QString argument = command.section(u' ', 1).trimmed();
+    if (verb == QStringLiteral("gui")) {
+        capture();
+    } else if (verb == QStringLiteral("full")) {
+        captureFull();
+    } else if (verb == QStringLiteral("open")) {
+        if (argument.isEmpty())
+            openImage();
+        else
+            openEditor(argument);
+    } else if (verb == QStringLiteral("settings")) {
+        openSettings();
+    } else if (verb == QStringLiteral("quit")) {
+        quit();
+    } else if (!verb.isEmpty()) {
+        qWarning("Unknown command: %s", qPrintable(command));
+    }
+}
+
+QQuickWindow *App::createWindow(const QString &type, const QVariantMap &properties)
+{
+    QQmlComponent component(m_engine);
+    component.loadFromModule(QStringLiteral("Guckste"), type);
+    if (component.isError()) {
+        for (const QQmlError &error : component.errors())
+            qWarning("%s", qPrintable(error.toString()));
+        return nullptr;
+    }
+    QObject *object = component.createWithInitialProperties(properties);
+    if (component.isError()) {
+        for (const QQmlError &error : component.errors())
+            qWarning("%s", qPrintable(error.toString()));
+        delete object;
+        return nullptr;
+    }
+    auto *window = qobject_cast<QQuickWindow *>(object);
+    if (!window) {
+        qWarning("%s is not a window", qPrintable(type));
+        delete object;
+        return nullptr;
+    }
+    // Closing a window is the end of it.
+    connect(window, &QWindow::visibleChanged, window, [window](bool visible) {
+        if (!visible)
+            window->deleteLater();
+    });
+    return window;
+}
+
+void App::capture()
+{
+    if (m_overlay) {
+        m_overlay->requestActivate();
+        return;
+    }
+    // The tray menu may still be on screen; let it go first.
+    QTimer::singleShot(150, this, [this] {
+        ScreenCapture::grab(this, [this](const Capture &capture) {
+            if (!capture.ok) {
+                notify(tr("Screenshot failed"), tr("The screen could not be captured."));
+                return;
+            }
+            auto *document = new Document;
+            document->setImage(capture.image);
+            QQuickWindow *overlay = createWindow(QStringLiteral("CaptureOverlay"),
+                                                 {{QStringLiteral("document"), QVariant::fromValue(document)},
+                                                  {QStringLiteral("screenGeometry"), capture.geometry}});
+            if (!overlay) {
+                delete document;
+                return;
+            }
+            document->setParent(overlay);
+            m_overlay = overlay;
+            connect(overlay, &QObject::destroyed, this, &App::capturingChanged);
+            emit capturingChanged();
+            overlay->show();
+            overlay->raise();
+            overlay->requestActivate();
+        });
+    });
+}
+
+void App::captureFull()
+{
+    QTimer::singleShot(150, this, [this] {
+        ScreenCapture::grab(this, [this](const Capture &capture) {
+            if (!capture.ok) {
+                notify(tr("Screenshot failed"), tr("The screen could not be captured."));
+                return;
+            }
+            Document document;
+            document.setImage(capture.image);
+            document.copyToClipboard(1);
+            const QString path = Preferences::instance()->nextSavePath();
+            if (document.save(path, 1))
+                notify(tr("Screenshot saved"), QFileInfo(path).fileName());
+            else
+                notify(tr("Screenshot copied"), tr("Could not save to %1").arg(path));
+        });
+    });
+}
+
+void App::openImage()
+{
+    const QString start = Preferences::instance()->saveDirectory();
+    const QString path = QFileDialog::getOpenFileName(
+        nullptr, tr("Open Image"), QFileInfo::exists(start) ? start : QString(),
+        tr("Images (*.png *.jpg *.jpeg *.bmp *.webp *.gif);;All files (*)"));
+    if (!path.isEmpty())
+        openEditor(path);
+}
+
+bool App::openEditor(const QString &path)
+{
+    auto *document = new Document;
+    if (!document->load(path)) {
+        delete document;
+        notify(tr("Could not open image"), path);
+        return false;
+    }
+    showEditor(document);
+    return true;
+}
+
+void App::editInWindow(Document *document, const QRectF &region)
+{
+    if (!document)
+        return;
+    document->crop(region);
+    // Out of the overlay, which is about to close and would delete it.
+    document->setParent(nullptr);
+    showEditor(document);
+    closeOverlay();
+}
+
+void App::showEditor(Document *document)
+{
+    QQuickWindow *editor = createWindow(QStringLiteral("EditorWindow"),
+                                        {{QStringLiteral("document"), QVariant::fromValue(document)}});
+    if (!editor) {
+        delete document;
+        return;
+    }
+    document->setParent(editor);
+    m_editors.append(editor);
+    m_editors.removeAll(nullptr);
+    editor->show();
+    editor->raise();
+    editor->requestActivate();
+}
+
+void App::openSettings()
+{
+    if (m_settings) {
+        m_settings->raise();
+        m_settings->requestActivate();
+        return;
+    }
+    m_settings = createWindow(QStringLiteral("SettingsWindow"), {});
+    if (m_settings)
+        m_settings->show();
+}
+
+void App::closeOverlay()
+{
+    if (m_overlay)
+        m_overlay->close();
+}
+
+void App::notify(const QString &title, const QString &text)
+{
+    if (m_tray && m_tray->isVisible())
+        m_tray->showMessage(title, text, QSystemTrayIcon::Information, 3000);
+    else
+        qInfo("%s: %s", qPrintable(title), qPrintable(text));
+}
+
+void App::quit()
+{
+    QApplication::quit();
+}

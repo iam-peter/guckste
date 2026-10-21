@@ -1,0 +1,175 @@
+#include "Preferences.h"
+
+#include "FileNaming.h"
+
+#include <QCoreApplication>
+#include <QDir>
+#include <QFile>
+#include <QFileInfo>
+#include <QStandardPaths>
+#include <QtQml/qqmlengine.h>
+
+namespace {
+const auto kSaveDirectory = "capture/saveDirectory";
+const auto kFilenamePattern = "capture/filenamePattern";
+const auto kCopyPath = "capture/copyPathAfterSave";
+const auto kColor = "tools/color";
+const auto kSize = "tools/size";
+const auto kShowGrid = "editor/showGrid";
+const auto kDefaultPattern = "guckste_%Y-%m-%d_%H-%M-%S";
+} // namespace
+
+Preferences::Preferences(QObject *parent)
+    : QObject(parent)
+{
+}
+
+Preferences *Preferences::instance()
+{
+    static Preferences preferences;
+    return &preferences;
+}
+
+Preferences *Preferences::create(QQmlEngine *, QJSEngine *)
+{
+    Preferences *p = instance();
+    QQmlEngine::setObjectOwnership(p, QQmlEngine::CppOwnership);
+    return p;
+}
+
+QString Preferences::saveDirectory() const
+{
+    const QString fallback = QStandardPaths::writableLocation(QStandardPaths::PicturesLocation)
+                             + QStringLiteral("/Screenshots");
+    return m_settings.value(kSaveDirectory, fallback).toString();
+}
+
+void Preferences::setSaveDirectory(const QString &dir)
+{
+    if (dir == saveDirectory())
+        return;
+    m_settings.setValue(kSaveDirectory, dir);
+    emit changed();
+}
+
+QString Preferences::filenamePattern() const
+{
+    return m_settings.value(kFilenamePattern, QString::fromLatin1(kDefaultPattern)).toString();
+}
+
+void Preferences::setFilenamePattern(const QString &pattern)
+{
+    if (pattern == filenamePattern())
+        return;
+    m_settings.setValue(kFilenamePattern, pattern.isEmpty() ? QString::fromLatin1(kDefaultPattern) : pattern);
+    emit changed();
+}
+
+QString Preferences::autostartPath()
+{
+    return QStandardPaths::writableLocation(QStandardPaths::ConfigLocation) + QStringLiteral("/autostart/guckste.desktop");
+}
+
+bool Preferences::launchAtLoginSupported() const
+{
+#if defined(Q_OS_LINUX)
+    return true;
+#else
+    return false;
+#endif
+}
+
+bool Preferences::launchAtLogin() const
+{
+    return launchAtLoginSupported() && QFile::exists(autostartPath());
+}
+
+void Preferences::setLaunchAtLogin(bool on)
+{
+    if (!launchAtLoginSupported() || on == launchAtLogin())
+        return;
+    const QString path = autostartPath();
+    if (!on) {
+        QFile::remove(path);
+    } else {
+        // An AppImage has to be started by its own path, an installed
+        // guckste by its name.
+        QString exec = QString::fromLocal8Bit(qgetenv("APPIMAGE"));
+        if (exec.isEmpty())
+            exec = QCoreApplication::applicationFilePath();
+        if (exec.startsWith(QStringLiteral("/usr/")) || exec.startsWith(QStringLiteral("/opt/")))
+            exec = QStringLiteral("guckste");
+        QDir().mkpath(QFileInfo(path).absolutePath());
+        QFile file(path);
+        if (file.open(QIODevice::WriteOnly | QIODevice::Text)) {
+            file.write(QStringLiteral("[Desktop Entry]\nType=Application\nName=Guckste\n"
+                                      "Comment=Screenshot tool in the tray\nExec=\"%1\"\nIcon=guckste\n"
+                                      "Terminal=false\nX-GNOME-Autostart-enabled=true\n")
+                           .arg(exec)
+                           .toUtf8());
+        }
+    }
+    emit changed();
+}
+
+QColor Preferences::color() const
+{
+    return m_settings.value(kColor, QColor(255, 59, 48)).value<QColor>();
+}
+
+void Preferences::setColor(const QColor &color)
+{
+    if (color == this->color())
+        return;
+    m_settings.setValue(kColor, color);
+    emit changed();
+}
+
+qreal Preferences::size() const
+{
+    return m_settings.value(kSize, 3.0).toReal();
+}
+
+void Preferences::setSize(qreal size)
+{
+    if (qFuzzyCompare(size, this->size()))
+        return;
+    m_settings.setValue(kSize, size);
+    emit changed();
+}
+
+bool Preferences::showGrid() const
+{
+    return m_settings.value(kShowGrid, true).toBool();
+}
+
+void Preferences::setShowGrid(bool on)
+{
+    if (on == showGrid())
+        return;
+    m_settings.setValue(kShowGrid, on);
+    emit changed();
+}
+
+bool Preferences::copyPathAfterSave() const
+{
+    return m_settings.value(kCopyPath, false).toBool();
+}
+
+void Preferences::setCopyPathAfterSave(bool on)
+{
+    if (on == copyPathAfterSave())
+        return;
+    m_settings.setValue(kCopyPath, on);
+    emit changed();
+}
+
+QString Preferences::nextSavePath() const
+{
+    return FileNaming::uniquePath(saveDirectory(), filenamePattern(), QStringLiteral("png"));
+}
+
+QString Preferences::previewFileName(const QString &pattern) const
+{
+    return FileNaming::expand(pattern, QDateTime::currentDateTime()) + QStringLiteral(".png");
+}
