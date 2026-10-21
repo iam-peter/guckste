@@ -56,12 +56,13 @@ quits the running one and takes its place, for a new build):
 ### Picking a region
 
 The screen is dimmed and a crosshair follows the pointer with its
-coordinates. The window under the pointer is outlined, and a click takes
-it, frame included; a click on no window takes the whole screen under
-the pointer, and Ctrl+A all screens. Drag to pick any other region. The
-region of last time is drawn dashed with a badge that takes it again,
-so the same part of the screen can be captured or recorded over and
-over. The region can be dragged, resized
+coordinates. A bar at the top of the pointer's screen picks the way:
+**Window** (2) outlines the window under the pointer, frame included,
+and a click takes it; **Screen** (1) does the same with the screen;
+**Region** (3) leaves clicks alone; and **Previous** (4) takes the
+region of last time, drawn dashed, so the same part of the screen can be
+captured or recorded over and over. A drag picks a region in any mode,
+and Ctrl+A takes all screens. Window is the mode to start with. The region can be dragged, resized
 by its handles and nudged with the arrow keys (Shift for 10 px). A toolbar
 appears under it:
 

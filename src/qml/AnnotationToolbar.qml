@@ -61,6 +61,14 @@ ToolBar {
         onAccepted: bar.colorPicked(selectedColor)
     }
 
+    // Nothing pressed on the bar reaches what is below it.
+    MouseArea {
+        anchors.fill: parent
+        z: -1
+        acceptedButtons: Qt.AllButtons
+        onWheel: wheel => wheel.accepted = true
+    }
+
     RowLayout {
         spacing: 2
 
@@ -91,7 +99,11 @@ ToolBar {
                 border.color: current ? Theme.accent : (bar.dark ? "#80ffffff" : "#80000000")
                 border.width: current ? 2 : 1
                 HoverHandler { cursorShape: Qt.PointingHandCursor }
-                TapHandler { onTapped: bar.colorPicked(swatch.modelData) }
+                // Takes the press, so it does not fall through the bar.
+                TapHandler {
+                    gesturePolicy: TapHandler.ReleaseWithinBounds
+                    onTapped: bar.colorPicked(swatch.modelData)
+                }
             }
         }
         IconButton {

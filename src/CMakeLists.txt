@@ -101,6 +101,10 @@ qt_add_qml_module(guckste_qml
         icons/grid-2x2.svg
         icons/grid-3x3.svg
         icons/hash.svg
+        icons/history.svg
+        icons/square-dashed.svg
+        icons/app-window.svg
+        icons/monitor.svg
         icons/keyboard.svg
         icons/highlighter.svg
         icons/maximize.svg

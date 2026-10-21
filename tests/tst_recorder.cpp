@@ -264,7 +264,14 @@ private slots:
         QCOMPARE(KeyListener::label(u"BackSpace"_s, false, false, false, false), u"⌫"_s);
         QCOMPARE(KeyListener::label(u"Tab"_s, true, false, false, false), u"Shift+Tab"_s);
         QCOMPARE(KeyListener::label(u"KP_Enter"_s, false, false, true, false), u"Alt+Enter"_s);
-        QCOMPARE(KeyListener::label(u"F5"_s, false, false, false, true), u"Super+F5"_s);
+#if defined(Q_OS_MACOS)
+        const QString super = u"Cmd"_s;
+#elif defined(Q_OS_WIN)
+        const QString super = u"Win"_s;
+#else
+        const QString super = u"Super"_s;
+#endif
+        QCOMPARE(KeyListener::label(u"F5"_s, false, false, false, true), super + u"+F5"_s);
         QCOMPARE(KeyListener::label(u"adiaeresis"_s, false, false, false, false), u"ä"_s);
 
         KeyOverlay overlay;

@@ -19,6 +19,12 @@ Window {
     // The windows on screen, front to back, in capture coordinates: the one
     // under the pointer is highlighted and a click takes it.
     property var windowRects: []
+    // The screen the pointer was on when the overlay opened, in capture
+    // coordinates: the mode bar goes there.
+    property rect pointerScreen: Qt.rect(0, 0, 0, 0)
+    // How a click picks: "screen", "window" or "region" (a drag always
+    // picks a region, whatever the mode).
+    property string pickMode: "window"
 
     x: screenGeometry.x
     y: screenGeometry.y
@@ -54,15 +60,34 @@ Window {
     }
     readonly property bool lastRegionOffered: !hasSelection && lastRegion.width > 0 && mouse.mode === ""
 
+    readonly property bool picking: tool === Document.Select && mouse.mode === "" && cursor.x >= 0
+                                    && !(hasSelection && mouse.insideSelection(cursor))
+
     // The window under the pointer, in image pixels, while picking.
     readonly property rect hoveredWindow: {
-        if (hasSelection || mouse.mode !== "" || cursor.x < 0)
+        if (pickMode !== "window" || !picking)
             return Qt.rect(0, 0, 0, 0)
         const vx = cursor.x / imageScale, vy = cursor.y / imageScale
         for (let i = 0; i < windowRects.length; ++i) {
             const r = windowRects[i]
             if (vx >= r.x && vx < r.x + r.width && vy >= r.y && vy < r.y + r.height)
                 return Qt.rect(r.x * imageScale, r.y * imageScale, r.width * imageScale, r.height * imageScale)
+        }
+        return Qt.rect(0, 0, 0, 0)
+    }
+
+    // The screen under the pointer, in image pixels, while picking.
+    readonly property rect hoveredScreen: {
+        if (pickMode !== "screen" || !picking)
+            return Qt.rect(0, 0, 0, 0)
+        const gx = cursor.x / imageScale + screenGeometry.x
+        const gy = cursor.y / imageScale + screenGeometry.y
+        const screens = Qt.application.screens
+        for (let i = 0; i < screens.length; ++i) {
+            const s = screens[i]
+            if (gx >= s.virtualX && gx < s.virtualX + s.width && gy >= s.virtualY && gy < s.virtualY + s.height)
+                return Qt.rect((s.virtualX - screenGeometry.x) * imageScale, (s.virtualY - screenGeometry.y) * imageScale,
+                               s.width * imageScale, s.height * imageScale)
         }
         return Qt.rect(0, 0, 0, 0)
     }
@@ -148,31 +173,16 @@ Window {
                                              Math.round(selection.height / imageScale))
     }
 
-    function insideLastRegion(p: point): bool {
-        const r = lastRegion
-        return r.width > 0 && p.x >= r.x && p.x < r.x + r.width && p.y >= r.y && p.y < r.y + r.height
-    }
-
-    function onLastBadge(x: real, y: real): bool {
-        if (!lastRegionOffered)
-            return false
-        const b = lastBadge.mapToItem(null, 0, 0)
-        return x >= b.x && x < b.x + lastBadge.width && y >= b.y && y < b.y + lastBadge.height
-    }
-
-    // A click with no drag: the badge of last time's region, the window
-    // under the pointer, or the whole screen.
-    function pickAt(x: real, y: real) {
-        if (mouse.pressedBadge) {
+    function takeLastRegion() {
+        if (lastRegion.width > 0)
             setSelection(lastRegion.x, lastRegion.y, lastRegion.width, lastRegion.height)
-            return
-        }
-        const w = mouse.pressedWindow
-        if (w.width > 0) {
-            setSelection(w.x, w.y, w.width, w.height)
-            return
-        }
-        selectScreenAt(x, y)
+    }
+
+    // A click with no drag takes what the mode highlighted.
+    function pickAt(x: real, y: real) {
+        const r = mouse.pressedTarget
+        if (r.width > 0)
+            setSelection(r.x, r.y, r.width, r.height)
     }
 
     function copy() {
@@ -298,13 +308,14 @@ Window {
         border.width: 1
     }
 
-    // The window under the pointer: click to take it.
+    // The window or screen under the pointer: click to take it.
     Rectangle {
-        visible: root.hoveredWindow.width > 0
-        x: root.hoveredWindow.x * root.zoom
-        y: root.hoveredWindow.y * root.zoom
-        width: root.hoveredWindow.width * root.zoom
-        height: root.hoveredWindow.height * root.zoom
+        readonly property rect target: root.pickMode === "screen" ? root.hoveredScreen : root.hoveredWindow
+        visible: target.width > 0
+        x: target.x * root.zoom
+        y: target.y * root.zoom
+        width: target.width * root.zoom
+        height: target.height * root.zoom
         color: "#18ffffff"
         border.color: "#ffffff"
         border.width: 2
@@ -320,12 +331,12 @@ Window {
                 anchors.centerIn: parent
                 color: Theme.panelText
                 font.pixelSize: 12
-                text: `${Math.round(root.hoveredWindow.width)} × ${Math.round(root.hoveredWindow.height)}`
+                text: `${Math.round(parent.parent.target.width)} × ${Math.round(parent.parent.target.height)}`
             }
         }
     }
 
-    // Last time's region: click its badge to take it again.
+    // Last time's region, dashed: the mode bar's Previous takes it again.
     Item {
         id: ghost
         visible: root.lastRegionOffered
@@ -346,24 +357,6 @@ Window {
                 PathLine { x: ghost.width - 1; y: ghost.height - 1 }
                 PathLine { x: 1; y: ghost.height - 1 }
                 PathLine { x: 1; y: 1 }
-            }
-        }
-        Rectangle {
-            id: lastBadge
-            x: 0
-            y: parent.height >= height + 8 ? parent.height - height - 4 : parent.height + 4
-            width: lastLabel.implicitWidth + 12
-            height: lastLabel.implicitHeight + 6
-            radius: 4
-            color: root.cursor.x >= 0 && root.onLastBadge(root.cursor.x * root.zoom, root.cursor.y * root.zoom)
-                   ? Qt.lighter(Theme.accent, 1.2) : Theme.accent
-            Label {
-                id: lastLabel
-                anchors.centerIn: parent
-                color: "#1a1a1a"
-                font.pixelSize: 12
-                font.bold: true
-                text: root.recordMode ? qsTr("Record this region again") : qsTr("Take this region again")
             }
         }
     }
@@ -454,8 +447,7 @@ Window {
         // "draw": an annotation; "drag": moving an annotation.
         property string mode: ""
         property point anchor
-        property rect pressedWindow
-        property bool pressedBadge: false
+        property rect pressedTarget
         property rect startSelection
         property int handle: -1
         property point last
@@ -510,9 +502,8 @@ Window {
             }
             textEntry.commit()
             if (!root.hasSelection) {
-                // Noted before "select" mode hides them.
-                pressedWindow = root.hoveredWindow
-                pressedBadge = root.onLastBadge(event.x, event.y)
+                // Noted before "select" mode hides the highlight.
+                pressedTarget = root.pickMode === "screen" ? root.hoveredScreen : root.hoveredWindow
                 mode = "select"
                 anchor = p
                 return
@@ -540,6 +531,7 @@ Window {
                     startSelection = root.selection
                     anchor = p
                 } else {
+                    pressedTarget = root.pickMode === "screen" ? root.hoveredScreen : root.hoveredWindow
                     mode = "select"
                     anchor = p
                 }
@@ -600,6 +592,58 @@ Window {
         }
 
         onExited: root.cursor = Qt.point(-1, -1)
+    }
+
+    // Screen, window, region, or last time's region, on the pointer's screen.
+    Rectangle {
+        id: modeBar
+        readonly property rect home: root.pointerScreen.width > 0 ? root.pointerScreen : Qt.rect(0, 0, root.width, root.height)
+        x: home.x + home.width / 2 - width / 2
+        y: home.y + 12
+        width: modeRow.implicitWidth + 12
+        height: modeRow.implicitHeight + 10
+        radius: 8
+        color: Theme.panel
+        border.color: "#55ffffff"
+        border.width: 1
+        visible: mouse.mode === ""
+        palette.buttonText: Theme.panelText
+        palette.button: "#3a3a44"
+        palette.highlight: Theme.accent
+
+        MouseArea {
+            anchors.fill: parent
+            acceptedButtons: Qt.AllButtons
+        }
+
+        Row {
+            id: modeRow
+            anchors.centerIn: parent
+            spacing: 2
+            Repeater {
+                model: [
+                    { mode: "screen", icon: "monitor", text: qsTr("Screen"), tip: qsTr("Click a screen (1)") },
+                    { mode: "window", icon: "app-window", text: qsTr("Window"), tip: qsTr("Click a window (2)") },
+                    { mode: "region", icon: "square-dashed", text: qsTr("Region"), tip: qsTr("Drag out a region (3)") },
+                ]
+                IconButton {
+                    required property var modelData
+                    iconName: modelData.icon
+                    text: modelData.text
+                    tip: modelData.tip
+                    checkable: true
+                    checked: root.pickMode === modelData.mode
+                    onClicked: root.pickMode = modelData.mode
+                }
+            }
+            IconButton {
+                iconName: "history"
+                text: qsTr("Previous")
+                tip: root.lastRegion.width > 0 ? qsTr("Take the region of last time (4)") : qsTr("No region from last time")
+                enabled: root.lastRegion.width > 0
+                onClicked: root.takeLastRegion()
+            }
+        }
     }
 
     TextEntry {
@@ -671,6 +715,10 @@ Window {
         onActivated: root.document.removeAnnotation(root.document.selectedIndex)
     }
     Shortcut { sequence: "Ctrl+A"; enabled: !textEntry.visible; onActivated: root.setSelection(0, 0, root.document.imageWidth, root.document.imageHeight) }
+    Shortcut { sequence: "1"; enabled: !textEntry.visible; onActivated: root.pickMode = "screen" }
+    Shortcut { sequence: "2"; enabled: !textEntry.visible; onActivated: root.pickMode = "window" }
+    Shortcut { sequence: "3"; enabled: !textEntry.visible; onActivated: root.pickMode = "region" }
+    Shortcut { sequence: "4"; enabled: !textEntry.visible; onActivated: root.takeLastRegion() }
     Shortcut { sequence: "Left"; enabled: !textEntry.visible; onActivated: root.nudge(-1, 0) }
     Shortcut { sequence: "Right"; enabled: !textEntry.visible; onActivated: root.nudge(1, 0) }
     Shortcut { sequence: "Up"; enabled: !textEntry.visible; onActivated: root.nudge(0, -1) }

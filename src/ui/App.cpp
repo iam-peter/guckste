@@ -11,6 +11,7 @@
 #include <QAction>
 #include <QApplication>
 #include <QClipboard>
+#include <QCursor>
 #include <QFileDialog>
 #include <QDir>
 #include <QFile>
@@ -194,11 +195,15 @@ void App::openOverlay(bool recordMode)
             QVariantList windows;
             for (const QRect &w : WindowFinder::windows())
                 windows << QRectF(w.translated(-capture.geometry.topLeft()));
+            QRect pointerScreen;
+            if (QScreen *screen = QGuiApplication::screenAt(QCursor::pos()))
+                pointerScreen = screen->geometry().translated(-capture.geometry.topLeft());
             QQuickWindow *overlay = createWindow(QStringLiteral("CaptureOverlay"),
                                                  {{QStringLiteral("document"), QVariant::fromValue(document)},
                                                   {QStringLiteral("screenGeometry"), capture.geometry},
                                                   {QStringLiteral("recordMode"), recordMode},
-                                                  {QStringLiteral("windowRects"), windows}});
+                                                  {QStringLiteral("windowRects"), windows},
+                                                  {QStringLiteral("pointerScreen"), pointerScreen}});
             if (!overlay) {
                 delete document;
                 return;
