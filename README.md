@@ -98,6 +98,12 @@ be dragged anywhere. Neither is in the recording. When a whole screen is
 recorded there is no panel: the tray menu's Stop Recording or `guckste
 record` ends it.
 
+The panel says "Starting…" for the first 1.5 seconds, which are left out:
+windows the overlay covered, like a browser playing a video, stop drawing
+meanwhile and take a moment to draw again, and would otherwise open the
+video with a frozen picture. The microphone starts with the video, so the
+sound stays with the picture.
+
 The pointer is in screenshots and recordings unless the settings say
 otherwise: the real cursor image on X11 (XFixes), Windows and macOS,
 and an arrow standing in for it on Wayland. The settings can also show

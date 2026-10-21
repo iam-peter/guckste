@@ -38,6 +38,8 @@ class ScreenRecorder : public QObject
     Q_PROPERTY(QString outputPath READ outputPath NOTIFY outputPathChanged)
     Q_PROPERTY(bool canPause READ canPause NOTIFY outputPathChanged)
     Q_PROPERTY(QStringList recentKeys READ recentKeys NOTIFY recentKeysChanged)
+    // The first moment of a recording, left out of it: see warmUpMs.
+    Q_PROPERTY(bool starting READ starting NOTIFY startingChanged)
 
 public:
     enum State { Idle, Recording, Paused, Stopping };
@@ -55,7 +57,16 @@ public:
     QString outputPath() const { return m_outputPath; }
     // A pause cuts the time out of the video, which the microphone's audio
     // would not follow; so there is none while it is recorded.
-    bool canPause() const { return !m_audio; }
+    bool canPause() const { return !m_audio && !m_starting; }
+    bool starting() const { return m_starting; }
+
+    // How long the screen is captured before the recording begins, the
+    // frames dropped: windows that the capture overlay covered, like a
+    // browser playing a video, stop drawing meanwhile and take a moment to
+    // draw again, which would open the video with a stale, frozen picture.
+    // The encoder, and the microphone, start only after it, so the sound
+    // stays with the picture.
+    static constexpr int warmUpMs = 1500;
 
     // Starts recording `region` (logical screen coordinates, clipped to the
     // desktop) to `path`, whose suffix should match Encoding::bestFormat().
@@ -89,11 +100,13 @@ signals:
     // Something to tell that does not stop the recording.
     void notice(const QString &message);
     void recentKeysChanged();
+    void startingChanged();
 
 private:
     void setState(State state);
     bool startCapture(QScreen *preferred);
     void onFrame(const QVideoFrame &frame);
+    void beginEncoding();
     void finish();
 
     State m_state = Idle;
@@ -111,6 +124,9 @@ private:
     bool m_failed = false;
     // Paused time so far, taken off the frames' timestamps.
     qint64 m_pausedTotal = 0;
+    bool m_starting = false;
+    // The capture time of the first frame recorded, which becomes 0.
+    qint64 m_startTime = -1;
     QElapsedTimer m_pauseTimer;
 
     std::unique_ptr<QScreenCapture> m_screenCapture;

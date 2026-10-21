@@ -103,6 +103,11 @@ private slots:
         const bool started = recorder.start(QRect(100, 100, 640, 360), path, ScreenRecorder::Options());
         QVERIFY2(started, qPrintable(errors.join(u"; "_s)));
         QCOMPARE(recorder.state(), ScreenRecorder::Recording);
+        // The first moment is left out, and cannot be paused.
+        QVERIFY(recorder.starting());
+        QVERIFY(!recorder.canPause());
+        QTRY_VERIFY_WITH_TIMEOUT(!recorder.starting(), ScreenRecorder::warmUpMs + 500);
+        QVERIFY(recorder.canPause());
         QTest::qWait(1500);
         recorder.pause();
         QCOMPARE(recorder.state(), ScreenRecorder::Paused);

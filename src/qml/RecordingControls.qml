@@ -102,20 +102,22 @@ Window {
                 implicitHeight: 12
                 radius: 6
                 color: "#ff3b30"
-                opacity: root.paused ? 0.4 : 1
+                opacity: root.paused || root.recorder.starting ? 0.4 : 1
                 SequentialAnimation on opacity {
-                    running: !root.paused && root.recorder.state === ScreenRecorder.Recording
+                    running: !root.paused && !root.recorder.starting && root.recorder.state === ScreenRecorder.Recording
                     loops: Animation.Infinite
                     NumberAnimation { to: 0.25; duration: 600 }
                     NumberAnimation { to: 1; duration: 600 }
                 }
             }
             Label {
-                text: root.time(root.recorder.duration)
+                // The first moment is left out, while windows the overlay
+                // covered draw again.
+                text: root.recorder.starting ? qsTr("Starting…") : root.time(root.recorder.duration)
                 color: Theme.panelText
                 font.pixelSize: 14
                 font.family: "monospace"
-                Layout.preferredWidth: 60
+                Layout.preferredWidth: 80
             }
             Label {
                 text: `${root.region.width} × ${root.region.height}`

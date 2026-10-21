@@ -151,17 +151,32 @@ bool ScreenRecorder::start(const QRect &region, const QString &path, const Optio
     m_recorder.setOutputLocation(QUrl::fromLocalFile(path));
 
     setState(Recording);
-    m_recorder.record();
-    if (m_failed) {
-        stop();
-        return false;
-    }
+    m_startTime = -1;
+    m_starting = true;
+    emit startingChanged();
+    emit outputPathChanged();
+    QTimer::singleShot(warmUpMs, this, &ScreenRecorder::beginEncoding);
     return true;
+}
+
+void ScreenRecorder::beginEncoding()
+{
+    if (!m_starting)
+        return;
+    m_starting = false;
+    emit startingChanged();
+    // canPause() changes with it.
+    emit outputPathChanged();
+    if (m_state != Recording)
+        return;
+    m_recorder.record();
+    if (m_failed)
+        stop();
 }
 
 void ScreenRecorder::onFrame(const QVideoFrame &frame)
 {
-    if (m_state != Recording || !frame.isValid())
+    if (m_state != Recording || m_starting || !frame.isValid())
         return;
     if (!m_cropKnown) {
         // The frame is the screen, or the whole desktop on X11.
@@ -192,8 +207,10 @@ void ScreenRecorder::onFrame(const QVideoFrame &frame)
     QVideoFrame out = VideoFrames::toNV12(image);
     if (!out.isValid())
         return;
-    out.setStartTime(frame.startTime());
-    out.setEndTime(frame.endTime());
+    if (m_startTime < 0)
+        m_startTime = qMax<qint64>(0, frame.startTime());
+    out.setStartTime(frame.startTime() >= 0 ? frame.startTime() - m_startTime : -1);
+    out.setEndTime(frame.endTime() >= 0 ? frame.endTime() - m_startTime : -1);
     if (m_pausedTotal > 0) {
         // Frames are explicitly shared, so this changes the sink's frame
         // too, which nothing else reads.
@@ -227,6 +244,10 @@ void ScreenRecorder::stop()
 {
     if (m_state == Idle || m_state == Stopping)
         return;
+    if (m_starting) {
+        m_starting = false;
+        emit startingChanged();
+    }
     setState(Stopping);
     if (m_screenCapture)
         m_screenCapture->stop();

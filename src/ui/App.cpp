@@ -419,8 +419,9 @@ void App::startRecording(const QRectF &region)
     }
     closeOverlay();
     const QRect rect = region.toAlignedRect();
-    // The overlay has to be off the screen before the first frame.
-    QTimer::singleShot(300, this, [this, rect] {
+    // The overlay goes first; the recorder then leaves its first moment
+    // out, while what the overlay covered draws again.
+    QTimer::singleShot(100, this, [this, rect] {
         Preferences *prefs = Preferences::instance();
         // To the editor first, or straight into the folder.
         QString path = prefs->nextRecordingPath(recordingSuffix());
