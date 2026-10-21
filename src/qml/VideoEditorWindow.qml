@@ -161,6 +161,7 @@ ApplicationWindow {
     }
 
     header: AnnotationToolbar {
+        objectName: "toolbar"
         overflow: true
         tool: root.tool
         color: root.toolColor

@@ -423,7 +423,7 @@ private slots:
         document->setSelectedIndex(0);
         QVERIFY(window->property("textMode").toBool());
         QCOMPARE(window->property("textSize").toReal(), 24.0);
-        QMetaObject::invokeMethod(toolbar, "textSizePicked", Q_ARG(double, 40.0));
+        QMetaObject::invokeMethod(toolbar, "pickTextSize", Q_ARG(double, 40.0));
         QCOMPARE(document->annotationSize(0), 40.0);
         QCOMPARE(window->property("textSize").toReal(), 40.0);
 
@@ -1110,6 +1110,70 @@ private slots:
         window->setProperty("discardConfirmed", true);
         window->close();
         QTRY_VERIFY(!window->isVisible());
+    }
+
+    // In every window, a selected mark takes the color and size picked
+    // on the toolbar, and selecting one shows its own there.
+    void toolbarRestylesTheSelection()
+    {
+        QTemporaryDir dir;
+        const QString clip = writeVideo(dir.path() + u"/clip.mp4"_s, 30, Qt::darkCyan);
+        QVERIFY(!clip.isEmpty());
+        for (const QString type : {u"EditorWindow"_s, u"VideoEditorWindow"_s, u"CaptureOverlay"_s}) {
+            auto *document = new Document;
+            document->setImage(demoScreen(320, 240));
+            QVariantMap properties{{u"document"_s, QVariant::fromValue(document)}};
+            if (type == u"VideoEditorWindow"_s) {
+                properties[u"sourcePath"_s] = clip;
+                properties[u"exporter"_s] = QVariant::fromValue(new VideoExporter(document));
+            } else if (type == u"CaptureOverlay"_s) {
+                properties[u"screenGeometry"_s] = QRect(0, 0, 320, 240);
+            }
+            QQmlComponent component(m_engine);
+            component.loadFromModule("Guckste", type.toUtf8());
+            auto *window = qobject_cast<QQuickWindow *>(component.createWithInitialProperties(properties));
+            QVERIFY2(window, qPrintable(component.errorString()));
+            document->setParent(window);
+            window->show();
+            QVERIFY(QTest::qWaitForWindowExposed(window));
+            auto *toolbar = window->findChild<QQuickItem *>(u"toolbar"_s);
+            QVERIFY2(toolbar, qPrintable(type));
+
+            document->beginAnnotation(Document::Arrow, 20, 20, Qt::red, 3);
+            document->updateAnnotation(120, 80, false);
+            document->commitAnnotation();
+            document->addText(40, 120, u"Note"_s, Qt::yellow, 20);
+            QCOMPARE(document->annotationCount(), 2);
+
+            // Selected, the arrow shows its color and takes new ones.
+            document->setSelectedIndex(0);
+            QTRY_COMPARE(toolbar->property("color").value<QColor>(), QColor(Qt::red));
+            QMetaObject::invokeMethod(toolbar, "pickColor", Q_ARG(QColor, QColor(Qt::green)));
+            QMetaObject::invokeMethod(toolbar, "pickSize", Q_ARG(double, 9.0));
+            QCOMPARE(document->annotationColor(0), QColor(Qt::green));
+            QCOMPARE(document->annotationSize(0), 9.0);
+            QVERIFY(!toolbar->property("showsTextSize").toBool());
+
+            // The text: its size in pixels, its color.
+            document->setSelectedIndex(1);
+            QTRY_COMPARE(toolbar->property("textSize").toReal(), 20.0);
+            QVERIFY(toolbar->property("showsTextSize").toBool());
+            QMetaObject::invokeMethod(toolbar, "pickTextSize", Q_ARG(double, 36.0));
+            QMetaObject::invokeMethod(toolbar, "pickColor", Q_ARG(QColor, QColor(Qt::blue)));
+            QCOMPARE(document->annotationSize(1), 36.0);
+            QCOMPARE(document->annotationColor(1), QColor(Qt::blue));
+            // The arrow is left as it was.
+            QCOMPARE(document->annotationColor(0), QColor(Qt::green));
+
+            // Nothing selected: only the next mark's style changes.
+            document->setSelectedIndex(-1);
+            QMetaObject::invokeMethod(toolbar, "pickColor", Q_ARG(QColor, QColor(Qt::magenta)));
+            QCOMPARE(document->annotationColor(1), QColor(Qt::blue));
+
+            window->setProperty("discardConfirmed", true);
+            window->close();
+            delete window;
+        }
     }
 
     void videoEditorLoads()

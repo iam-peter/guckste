@@ -98,20 +98,6 @@ ApplicationWindow {
         })
     }
 
-    // The selected mark, if any, takes what the toolbar sets: with the
-    // select tool any mark, with the text tool a text.
-    function restyleSelected(): int {
-        if (marks.editingIndex >= 0)
-            return marks.editingIndex
-        const index = document.selectedIndex
-        if (index < 0)
-            return -1
-        const kind = document.annotationTool(index)
-        if (tool === Document.Select)
-            return kind !== Document.Image ? index : -1
-        return tool === Document.Text && kind === Document.Text ? index : -1
-    }
-
     // The toolbar sets a text's pixel size instead of the stroke size.
     readonly property bool textMode: document.revision >= 0
                                      && (tool === Document.Text || marks.editingIndex >= 0
@@ -213,17 +199,6 @@ ApplicationWindow {
     Connections {
         target: root.document
         function onCanvasChanged() { root.followCanvas() }
-        // Selecting a mark shows its color and size in the toolbar.
-        function onSelectedIndexChanged() {
-            const index = root.document.selectedIndex
-            if (index < 0 || root.document.annotationTool(index) === Document.Image)
-                return
-            root.toolColor = root.document.annotationColor(index)
-            if (root.document.annotationTool(index) === Document.Text)
-                root.textSize = root.document.annotationSize(index)
-            else
-                root.size = root.document.annotationSize(index)
-        }
     }
 
     header: AnnotationToolbar {
@@ -237,24 +212,10 @@ ApplicationWindow {
         textMode: root.textMode
         document: root.document
         onToolPicked: tool => root.pickTool(tool)
-        onTextSizePicked: size => {
-            root.textSize = size
-            const index = root.restyleSelected()
-            if (index >= 0 && root.document.annotationTool(index) === Document.Text)
-                root.document.setAnnotationSize(index, size)
-        }
-        onColorPicked: picked => {
-            root.toolColor = picked
-            const index = root.restyleSelected()
-            if (index >= 0)
-                root.document.setAnnotationColor(index, picked)
-        }
-        onSizePicked: size => {
-            root.size = size
-            const index = root.restyleSelected()
-            if (index >= 0)
-                root.document.setAnnotationSize(index, size)
-        }
+        // It restyles the selected mark itself.
+        onTextSizePicked: size => root.textSize = size
+        onColorPicked: picked => root.toolColor = picked
+        onSizePicked: size => root.size = size
 
         IconButton {
             id: addButton

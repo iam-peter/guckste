@@ -16,9 +16,53 @@ ToolBar {
     property color color: "#ff3b30"
     property real size: 3
     // A text's font size in pixels, set instead of the stroke size while
-    // `textMode` is on: with the text tool, or a text selected.
+    // `textMode` is on, as with the text tool, or a text selected.
     property real textSize: 20
     property bool textMode: false
+    readonly property bool showsTextSize: textMode || selectedKind === Document.Text
+
+    // The selected mark takes what is picked here: color, stroke size, a
+    // text's size. Images have none of them. Selecting a mark shows its
+    // own in the bar, through the same signals.
+    readonly property int selectedMark: {
+        if (!document || document.revision < 0)
+            return -1
+        const index = document.selectedIndex
+        return index >= 0 && document.isShown(index) && document.annotationTool(index) !== Document.Image ? index : -1
+    }
+    readonly property int selectedKind: selectedMark >= 0 ? document.annotationTool(selectedMark) : -1
+
+    function pickColor(picked: color) {
+        colorPicked(picked)
+        if (selectedMark >= 0)
+            document.setAnnotationColor(selectedMark, picked)
+    }
+
+    function pickSize(picked: real) {
+        sizePicked(picked)
+        if (selectedMark >= 0 && selectedKind !== Document.Text)
+            document.setAnnotationSize(selectedMark, picked)
+    }
+
+    function pickTextSize(picked: real) {
+        textSizePicked(picked)
+        if (selectedKind === Document.Text)
+            document.setAnnotationSize(selectedMark, picked)
+    }
+
+    Connections {
+        target: bar.document
+        function onSelectedIndexChanged() {
+            const index = bar.selectedMark
+            if (index < 0)
+                return
+            bar.colorPicked(bar.document.annotationColor(index))
+            if (bar.selectedKind === Document.Text)
+                bar.textSizePicked(bar.document.annotationSize(index))
+            else
+                bar.sizePicked(bar.document.annotationSize(index))
+        }
+    }
     property Document document
     // The overlay's floating look: a dark panel with light icons.
     property bool dark: false
@@ -55,7 +99,7 @@ ToolBar {
         // Takes the press, so it does not fall through the bar.
         TapHandler {
             gesturePolicy: TapHandler.ReleaseWithinBounds
-            onTapped: bar.colorPicked(swatch.swatchColor)
+            onTapped: bar.pickColor(swatch.swatchColor)
         }
     }
 
@@ -276,7 +320,7 @@ ToolBar {
                 id: colorPicker
                 x: paletteButton.width / 2 - implicitWidth / 2
                 current: bar.color
-                onPicked: picked => bar.colorPicked(picked)
+                onPicked: picked => bar.pickColor(picked)
             }
         }
     }
@@ -288,7 +332,7 @@ ToolBar {
         ToolSeparator {}
 
         Rectangle {
-            visible: !bar.textMode
+            visible: !bar.showsTextSize
             Layout.preferredWidth: 20
             Layout.preferredHeight: 20
             color: "transparent"
@@ -304,7 +348,7 @@ ToolBar {
         }
         SpinBox {
             id: textSizeBox
-            visible: bar.textMode
+            visible: bar.showsTextSize
             Layout.preferredWidth: 110
             from: 4
             to: 400
@@ -312,20 +356,20 @@ ToolBar {
             value: Math.round(bar.textSize)
             textFromValue: (value, locale) => qsTr("%1 px").arg(value)
             valueFromText: (text, locale) => parseInt(text) || value
-            onValueModified: bar.textSizePicked(value)
+            onValueModified: bar.pickTextSize(value)
             ToolTip.text: qsTr("Text size in pixels")
             ToolTip.visible: hovered
             ToolTip.delay: 600
         }
         Slider {
             id: sizeSlider
-            visible: !bar.textMode
+            visible: !bar.showsTextSize
             Layout.preferredWidth: 90
             from: 1
             to: 20
             stepSize: 1
             value: bar.size
-            onMoved: bar.sizePicked(value)
+            onMoved: bar.pickSize(value)
             ToolTip.text: qsTr("Size: %1 px").arg(Math.round(value))
             ToolTip.visible: hovered || pressed
         }

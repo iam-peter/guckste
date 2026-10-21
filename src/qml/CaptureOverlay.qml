@@ -753,6 +753,7 @@ Window {
 
     AnnotationToolbar {
         id: toolbar
+        objectName: "toolbar"
         dark: true
         visible: root.hasSelection && mouse.mode !== "select" && mouse.mode !== "move" && mouse.mode !== "resize"
         tool: root.tool
