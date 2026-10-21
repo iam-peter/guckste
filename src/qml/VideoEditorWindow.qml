@@ -116,18 +116,28 @@ ApplicationWindow {
         source: "file://" + root.sourcePath
         videoOutput: videoView
         audioOutput: AudioOutput {}
-        // Nothing is shown until the player plays; a play and a pause
-        // bring the first frame up.
+        // Nothing is shown until the player renders a frame, which a seek
+        // makes it do, as scrubbing does; a play that is paused at once
+        // does not.
         onMediaStatusChanged: {
             if (player.mediaStatus === MediaPlayer.LoadedMedia) {
-                player.play()
                 player.pause()
+                firstFrame.restart()
             }
         }
         onPositionChanged: {
             if (player.playbackState === MediaPlayer.PlayingState && player.position >= root.effectiveEnd
                     && root.trimEnd >= 0)
                 player.pause()
+        }
+    }
+
+    Timer {
+        id: firstFrame
+        interval: 80
+        onTriggered: {
+            player.position = 1
+            player.position = 0
         }
     }
 
