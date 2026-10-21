@@ -141,10 +141,11 @@ it). Ctrl+wheel zooms at the pointer, the wheel scrolls, the middle button
 or Space drags the view, Ctrl+0 fits, Ctrl+1 is 100 %. The status bar
 shows the pixel under the pointer, its color and the canvas size.
 
-The same tools draw on it, and marks keep their on-screen size whatever
-the zoom: a 3 px pen is 3 px wide at 400 % too. That is the point of the
-editor: enlarge a screenshot, then put marks on it that are readable at
-that size. The measure tool drags a line along a row or column of pixels
+The same tools draw on it, and marks are part of the image: sizes are in
+image pixels, so a 3 px pen and a 20 px text grow with the screenshot
+when zooming in, as in any image editor. Measure marks are the exception:
+their line and label keep their size on screen, so they stay readable at
+800 % and beyond. The measure tool drags a line along a row or column of pixels
 and labels it with their count; the ends snap to pixel edges, so a drag
 from the left edge of one pixel to the right edge of another counts both.
 Alt measures at any angle, with the rounded length marked ≈.
@@ -179,9 +180,8 @@ above the screenshot: click one to select it, raise or lower it with the
 arrows, or remove it. Double-clicking a text there edits it too.
 
 Copy and save export what is on screen: the canvas enlarged pixel for
-pixel at the current zoom, with the marks drawn on top at their size.
-Untick "Export at … %" in the status bar to export at the image's own size
-instead, marks scaled down with it. Save (Ctrl+S) writes back to an image
+pixel at the current zoom, with the marks enlarged along. Untick "Export
+at … %" in the status bar to export at the image's own size instead. Save (Ctrl+S) writes back to an image
 that was opened from a file when exporting at 100 %, otherwise it asks for
 a name; Save as… (Ctrl+Shift+S) always asks.
 
@@ -217,8 +217,8 @@ build next to the Guckste in use, give it its own instance name:
 
 ## Layout
 
-- `src/core` — no Qt Quick dependency: `Annotation` (one mark, with its
-  geometry in image pixels and its stroke in output pixels),
+- `src/core` — no Qt Quick dependency: `Annotation` (one mark or added
+  image, its geometry and sizes in image pixels),
   `AnnotationPainter` (draws marks with a QPainter at any scale, the same
   way on screen and into the export), `Document` (the image, its marks,
   undo, rendering and saving), `ScreenCapture` (every screen through Qt,

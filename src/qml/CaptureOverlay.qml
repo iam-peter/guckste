@@ -746,7 +746,7 @@ Window {
 
     TextEntry {
         id: textEntry
-        pixelSize: root.textSize
+        pixelSize: root.textSize * root.zoom
         color: root.toolColor
         onAccepted: text => root.document.addText(imagePoint.x, imagePoint.y, text, root.toolColor, root.textSize)
     }

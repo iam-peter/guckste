@@ -382,8 +382,9 @@ Item {
     TextEntry {
         id: textEntry
         // An edited text keeps its own size and color.
-        pixelSize: area.editingIndex >= 0 && area.document.revision >= 0
-                   ? area.document.annotationSize(area.editingIndex) : area.textSize
+        // Text grows with the image, so it is typed at its size on screen.
+        pixelSize: (area.editingIndex >= 0 && area.document.revision >= 0
+                    ? area.document.annotationSize(area.editingIndex) : area.textSize) * area.zoom
         color: area.editingIndex >= 0 && area.document.revision >= 0
                ? area.document.annotationColor(area.editingIndex) : area.toolColor
         onAccepted: text => {

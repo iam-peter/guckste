@@ -8,10 +8,15 @@
 
 namespace {
 
-QPen strokePen(const Annotation &a)
+QPen strokePen(const Annotation &a, qreal scale)
 {
-    QPen pen(a.color, a.size, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin);
+    QPen pen(a.color, a.size * scale, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin);
     return pen;
+}
+
+qreal arrowHead(qreal size)
+{
+    return 6 + size * 2.5;
 }
 
 // Black on light colors, white on dark ones.
@@ -68,7 +73,7 @@ void AnnotationPainter::paint(const Annotation &a)
     m_painter.setRenderHint(QPainter::TextAntialiasing, true);
     switch (a.type) {
     case Annotation::Type::Pen: {
-        m_painter.setPen(strokePen(a));
+        m_painter.setPen(strokePen(a, m_scale));
         m_painter.setBrush(Qt::NoBrush);
         if (a.points.size() == 1) {
             m_painter.drawPoint(map(a.points.first()));
@@ -83,7 +88,7 @@ void AnnotationPainter::paint(const Annotation &a)
     }
     case Annotation::Type::Line:
         if (a.points.size() >= 2) {
-            m_painter.setPen(strokePen(a));
+            m_painter.setPen(strokePen(a, m_scale));
             m_painter.drawLine(map(a.points[0]), map(a.points[1]));
         }
         break;
@@ -91,12 +96,12 @@ void AnnotationPainter::paint(const Annotation &a)
         paintArrow(a);
         break;
     case Annotation::Type::Rectangle:
-        m_painter.setPen(strokePen(a));
+        m_painter.setPen(strokePen(a, m_scale));
         m_painter.setBrush(Qt::NoBrush);
         m_painter.drawRect(map(a.rect()));
         break;
     case Annotation::Type::Ellipse:
-        m_painter.setPen(strokePen(a));
+        m_painter.setPen(strokePen(a, m_scale));
         m_painter.setBrush(Qt::NoBrush);
         m_painter.drawEllipse(map(a.rect()));
         break;
@@ -136,14 +141,14 @@ void AnnotationPainter::paintArrow(const Annotation &a)
     const QLineF line(from, to);
     if (line.length() < 0.5)
         return;
-    const qreal head = 6 + a.size * 2.5;
+    const qreal head = arrowHead(a.size) * m_scale;
     const qreal angle = qDegreesToRadians(line.angle());
     const QPointF dir(std::cos(angle), -std::sin(angle));
     const QPointF normal(-dir.y(), dir.x());
     const QPointF base = to - dir * head;
     const QPolygonF tip{to, base + normal * head * 0.5, base - normal * head * 0.5};
 
-    m_painter.setPen(strokePen(a));
+    m_painter.setPen(strokePen(a, m_scale));
     // Stop the shaft inside the head so round caps don't poke out of it.
     m_painter.drawLine(from, to - dir * head * 0.6);
     m_painter.setPen(Qt::NoPen);
@@ -155,10 +160,13 @@ void AnnotationPainter::paintText(const Annotation &a)
 {
     if (a.text.isEmpty())
         return;
+    // Laid out at its own size and scaled with the image, so it wraps and
+    // spaces the same at every zoom.
+    m_painter.translate(map(a.points.first()));
+    m_painter.scale(m_scale, m_scale);
     m_painter.setFont(textFont(a.size));
     m_painter.setPen(a.color);
-    const QPointF at = map(a.points.first());
-    m_painter.drawText(QRectF(at, QSizeF(1e5, 1e5)), Qt::AlignLeft | Qt::AlignTop, a.text);
+    m_painter.drawText(QRectF(0, 0, 1e5, 1e5), Qt::AlignLeft | Qt::AlignTop, a.text);
 }
 
 void AnnotationPainter::paintPixelate(const Annotation &a)
@@ -191,12 +199,12 @@ void AnnotationPainter::paintImage(const Annotation &a)
 void AnnotationPainter::paintCounter(const Annotation &a)
 {
     const QPointF center = map(a.points.first());
-    const qreal r = counterRadius(a.size);
+    const qreal r = counterRadius(a.size) * m_scale;
     m_painter.setPen(Qt::NoPen);
     m_painter.setBrush(a.color);
     m_painter.drawEllipse(center, r, r);
     QFont font;
-    font.setPixelSize(qRound(r * 1.15));
+    font.setPixelSize(qMax(1, qRound(r * 1.15)));
     font.setBold(true);
     m_painter.setFont(font);
     m_painter.setPen(contrasting(a.color));
@@ -273,11 +281,11 @@ QRectF AnnotationPainter::bounds(const Annotation &a) const
         const QFontMetricsF metrics(textFont(a.size));
         const QRectF text = metrics.boundingRect(QRectF(0, 0, 1e5, 1e5), Qt::AlignLeft | Qt::AlignTop,
                                                  a.text.isEmpty() ? QStringLiteral("Text") : a.text);
-        painted = QRectF(map(a.points.first()), text.size());
+        painted = QRectF(map(a.points.first()), text.size() * m_scale);
         break;
     }
     case Annotation::Type::Counter: {
-        const qreal r = counterRadius(a.size);
+        const qreal r = counterRadius(a.size) * m_scale;
         painted = QRectF(map(a.points.first()) - QPointF(r, r), QSizeF(2 * r, 2 * r));
         break;
     }
@@ -294,13 +302,13 @@ QRectF AnnotationPainter::bounds(const Annotation &a) const
         return a.rect();
     case Annotation::Type::Arrow: {
         painted = map(a.geometryBounds());
-        const qreal head = 6 + a.size * 2.5;
+        const qreal head = arrowHead(a.size) * m_scale;
         painted.adjust(-head, -head, head, head);
         break;
     }
     default: {
         painted = map(a.geometryBounds());
-        const qreal half = a.size / 2 + 1;
+        const qreal half = a.size * m_scale / 2 + 1;
         painted.adjust(-half, -half, half, half);
         break;
     }

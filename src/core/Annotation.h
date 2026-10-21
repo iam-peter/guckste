@@ -8,10 +8,8 @@
 #include <QString>
 
 // One mark on the screenshot, or another image placed beside or over it.
-// Geometry is in image pixels so marks stay put when the view is zoomed;
-// `size` is a stroke width in output pixels, so a 3 px pen stays 3 px thin
-// on a 400 % export, which is what makes marks on an enlarged screenshot
-// readable.
+// Geometry and sizes are in image pixels, so marks zoom with the image as
+// if drawn into it; only Measure marks keep their size on screen.
 struct Annotation
 {
     enum class Type { Pen, Line, Arrow, Rectangle, Ellipse, Marker, Text, Pixelate, Counter, Measure, Image };
@@ -19,7 +17,8 @@ struct Annotation
     Type type = Type::Pen;
     QList<QPointF> points;
     QColor color = QColor(255, 59, 48);
-    // The stroke width, or a text's font size, in output pixels.
+    // The stroke width, or a text's font size, in image pixels; for a
+    // Measure mark in screen pixels.
     qreal size = 3;
     QString text;
     int number = 0;

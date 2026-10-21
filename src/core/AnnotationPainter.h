@@ -9,10 +9,11 @@
 #include <functional>
 
 // Draws annotations with a QPainter. Image coordinates are mapped to the
-// painter's as (p - origin) * scale, and stroke widths, text and labels are
-// in the painter's pixels: the same painter fills the on-screen layer at the
-// view's zoom and the exported image at its scale, so what is exported is
-// what was seen.
+// painter's as (p - origin) * scale, and so are stroke widths, text and
+// numbers: marks are part of the image and grow with it, whether on screen
+// at the view's zoom or exported at a scale, so what is exported is what
+// was seen. Measure marks are the exception: their line and label keep
+// the painter's pixels, to stay readable at any zoom.
 class AnnotationPainter
 {
 public:

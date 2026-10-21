@@ -134,10 +134,12 @@ private slots:
         QCOMPARE(region.pixelColor(0, 0), QColor(Qt::white));
     }
 
-    void annotationsAreDrawnInOutputPixels()
+    // Marks are part of the image: enlarged, a stroke and a text grow
+    // with it. A Measure mark keeps its line width, to stay readable.
+    void annotationsScaleWithTheImage()
     {
         Document doc;
-        QImage white(40, 40, QImage::Format_ARGB32_Premultiplied);
+        QImage white(60, 60, QImage::Format_ARGB32_Premultiplied);
         white.fill(Qt::white);
         doc.setImage(white);
         doc.beginAnnotation(Document::Rectangle, 10, 10, Qt::red, 2);
@@ -146,13 +148,43 @@ private slots:
 
         const QImage at1 = doc.render(1);
         QCOMPARE(at1.pixelColor(10, 20), QColor(Qt::red));
-        QCOMPARE(at1.pixelColor(20, 20), QColor(Qt::white));
+        QCOMPARE(at1.pixelColor(12, 20), QColor(Qt::white));
 
-        // At 4x the stroke is still 2 px wide, around the enlarged rectangle.
+        // At 4x the 2 px stroke is 8 px wide, centered on the edge at 40.
         const QImage at4 = doc.render(4);
-        QCOMPARE(at4.pixelColor(40, 80), QColor(Qt::red));
-        QCOMPARE(at4.pixelColor(80, 80), QColor(Qt::white));
-        QCOMPARE(at4.pixelColor(44, 80), QColor(Qt::white));
+        QCOMPARE(at4.pixelColor(37, 80), QColor(Qt::red));
+        QCOMPARE(at4.pixelColor(43, 80), QColor(Qt::red));
+        QCOMPARE(at4.pixelColor(46, 80), QColor(Qt::white));
+
+        const auto textHeight = [](const QImage &image, int fromY) {
+            int top = -1, bottom = -1;
+            for (int y = fromY; y < image.height(); ++y)
+                for (int x = 0; x < image.width(); ++x)
+                    if (image.pixelColor(x, y).blue() < 100) {
+                        if (top < 0)
+                            top = y;
+                        bottom = y;
+                    }
+            return bottom - top + 1;
+        };
+        doc.clearAnnotations();
+        doc.addText(5, 35, u"H"_s, Qt::black, 12);
+        const int small = textHeight(doc.render(1), 0);
+        const int large = textHeight(doc.render(4), 0);
+        QVERIFY2(std::abs(large - 4 * small) <= 4, qPrintable(u"%1 then %2"_s.arg(small).arg(large)));
+
+        doc.clearAnnotations();
+        doc.beginAnnotation(Document::Measure, 10, 50, Qt::blue, 2);
+        doc.updateAnnotation(50, 50, true);
+        doc.commitAnnotation();
+        const auto lineWidth = [](const QImage &image, int x) {
+            int count = 0;
+            for (int y = 0; y < image.height(); ++y)
+                if (image.pixelColor(x, y) == QColor(Qt::blue))
+                    ++count;
+            return count;
+        };
+        QCOMPARE(lineWidth(doc.render(1), 30), lineWidth(doc.render(4), 120));
     }
 
     void pixelateBlursPixels()

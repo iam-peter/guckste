@@ -10,8 +10,8 @@ import Guckste.Ui
 
 // A screenshot at any zoom, to draw on and measure, and to combine with
 // further screenshots and images. What is copied or saved is what is seen:
-// the canvas enlarged pixel for pixel, with the marks on top at their
-// on-screen size. The layer panel lists every mark and image.
+// the canvas enlarged pixel for pixel, the marks enlarged along with it.
+// The layer panel lists every mark and image.
 ApplicationWindow {
     id: root
 

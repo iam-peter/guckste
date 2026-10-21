@@ -222,11 +222,13 @@ private slots:
         QVERIFY(area && toolbar);
 
         document->addText(40, 40, u"Hgjy"_s, QColor(255, 255, 0), 24);
+        // Zoomed in, so the field has to grow with the text.
+        QVERIFY(QMetaObject::invokeMethod(window, "zoomAt", Q_ARG(double, 2.0), Q_ARG(double, 0.0), Q_ARG(double, 0.0)));
         QTest::qWait(50);
         QPointF v;
         QMetaObject::invokeMethod(area, "toView", Q_RETURN_ARG(QPointF, v), Q_ARG(double, 40), Q_ARG(double, 40));
         const QPoint at = area->mapToScene(v).toPoint();
-        const QRect zone(at.x() - 20, at.y() - 20, 120, 60);
+        const QRect zone(at.x() - 20, at.y() - 20, 240, 120);
         // The H's stem: the leftmost yellow column and its top.
         const auto stem = [&](const QImage &image) {
             for (int x = zone.left(); x <= zone.right(); ++x)
@@ -237,8 +239,17 @@ private slots:
                 }
             return QPoint();
         };
-        const QPoint drawn = stem(window->grabWindow());
+        const QImage shown = window->grabWindow();
+        const QPoint drawn = stem(shown);
         QVERIFY(!drawn.isNull());
+        // 24 px of text at 200 % stands about 48 px tall on screen.
+        int bottom = drawn.y();
+        for (int y = drawn.y(); y < zone.bottom(); ++y) {
+            const QColor c = shown.pixelColor(drawn.x() + 1, y);
+            if (c.red() > 200 && c.green() > 200 && c.blue() < 90)
+                bottom = y;
+        }
+        QVERIFY2(bottom - drawn.y() > 25, qPrintable(u"H is %1 px tall"_s.arg(bottom - drawn.y() + 1)));
         QMetaObject::invokeMethod(area, "editText", Q_ARG(int, 0));
         QTRY_VERIFY(area->property("editingText").toBool());
         QTest::qWait(50);
