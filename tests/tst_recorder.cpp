@@ -32,6 +32,11 @@ class TestRecorder : public QObject
     Q_OBJECT
 
 private slots:
+    void initTestCase()
+    {
+        Encoding::quietFFmpeg();
+    }
+
     void hasAnEncoder()
     {
         const QMediaFormat format = Encoding::bestFormat();

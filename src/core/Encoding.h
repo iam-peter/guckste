@@ -24,4 +24,11 @@ QMediaFormat bestFormat();
 bool canEncode(const QMediaFormat &format);
 QString suffixFor(const QMediaFormat &format);
 
+// Keeps FFmpeg's warnings off the terminal, errors still showing: Qt
+// works out an MP4 packet's duration from the time of the one before,
+// which with B-frames, as NVENC makes them, goes negative, and the muxer
+// warns about every such packet. The files are fine. QT_FFMPEG_DEBUG
+// still shows everything.
+void quietFFmpeg();
+
 } // namespace Encoding

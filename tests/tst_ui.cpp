@@ -203,6 +203,7 @@ private slots:
     {
         // Settings go to a throwaway location, not the user's.
         QStandardPaths::setTestModeEnabled(true);
+        Encoding::quietFFmpeg();
         QCoreApplication::setOrganizationName(u"guckste-test"_s);
         QCoreApplication::setOrganizationDomain(u"guckste.test"_s);
         QSettings().clear();

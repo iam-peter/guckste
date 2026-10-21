@@ -262,14 +262,6 @@ ApplicationWindow {
                     onTrimEndRequested: ms => root.trimEnd = ms
                 }
 
-                ToolButton {
-                    text: qsTr("Whole")
-                    focusPolicy: Qt.NoFocus
-                    visible: root.trimStart > 0 || root.trimEnd >= 0
-                    onClicked: { root.trimStart = 0; root.trimEnd = -1 }
-                    ToolTip.text: qsTr("Keep the whole video")
-                    ToolTip.visible: hovered
-                }
             }
 
             RowLayout {

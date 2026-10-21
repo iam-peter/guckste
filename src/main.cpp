@@ -1,3 +1,4 @@
+#include "core/Encoding.h"
 #include "core/Preferences.h"
 #include "core/SingleInstance.h"
 #include "ui/App.h"
@@ -83,6 +84,7 @@ int main(int argc, char *argv[])
         return 1;
     }
 
+    Encoding::quietFFmpeg();
     QQmlApplicationEngine engine;
     engine.addImageProvider(QStringLiteral("guckste"), new DocumentImageProvider);
     App guckste(&engine);

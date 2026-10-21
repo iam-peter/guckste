@@ -7,6 +7,7 @@
 #include <QEventLoop>
 #include <QFileInfo>
 #include <QImage>
+#include <QLibrary>
 #include <QMediaCaptureSession>
 #include <QMimeType>
 #include <QTemporaryDir>
@@ -128,4 +129,25 @@ QMediaFormat Encoding::bestFormat()
     chosen.resolveForEncoding(QMediaFormat::RequiresVideo);
     probed = true;
     return chosen;
+}
+
+void Encoding::quietFFmpeg()
+{
+    if (qEnvironmentVariableIsSet("QT_FFMPEG_DEBUG"))
+        return;
+    // The libavutil next to Qt's own libraries, whichever version this Qt
+    // ships: 61 with Qt 6.12, 59 with 6.11.
+    for (int major = 63; major >= 57; --major) {
+#if defined(Q_OS_WIN)
+        QLibrary avutil(QStringLiteral("avutil-%1").arg(major));
+#else
+        QLibrary avutil(QStringLiteral("avutil"), major);
+#endif
+        using SetLevel = void (*)(int);
+        if (auto setLevel = reinterpret_cast<SetLevel>(avutil.resolve("av_log_set_level"))) {
+            constexpr int avLogError = 16;
+            setLevel(avLogError);
+            return;
+        }
+    }
 }
