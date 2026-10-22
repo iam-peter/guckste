@@ -11,6 +11,10 @@ Item {
     id: timeline
 
     property int duration: 0
+    // How much time the width shows: the video, and room past its end to
+    // drag things into.
+    property int span: duration
+    readonly property int shownSpan: Math.max(span, duration)
     property int position: 0
     property int trimStart: 0
     // -1: up to the end.
@@ -34,13 +38,13 @@ Item {
     implicitWidth: 300
 
     function msToX(ms: int): real {
-        return duration > 0 ? margin + ms / duration * (width - 2 * margin) : margin
+        return shownSpan > 0 ? margin + ms / shownSpan * (width - 2 * margin) : margin
     }
 
     function xToMs(x: real): int {
-        if (duration <= 0)
+        if (shownSpan <= 0)
             return 0
-        return Math.round(Math.max(0, Math.min(1, (x - margin) / (width - 2 * margin))) * duration)
+        return Math.round(Math.max(0, Math.min(1, (x - margin) / (width - 2 * margin))) * shownSpan)
     }
 
     function time(ms: int): string {
@@ -55,7 +59,7 @@ Item {
         const steps = [250, 500, 1000, 2000, 5000, 10000, 15000, 30000, 60000, 120000, 300000, 600000]
         const usable = width - 2 * margin
         for (const step of steps) {
-            if (duration <= 0 || usable * step / duration >= 64)
+            if (shownSpan <= 0 || usable * step / shownSpan >= 64)
                 return step
         }
         return steps[steps.length - 1]
@@ -63,7 +67,7 @@ Item {
 
     // Ruler
     Repeater {
-        model: timeline.duration > 0 ? Math.floor(timeline.duration / timeline.tickStep) + 1 : 0
+        model: timeline.shownSpan > 0 ? Math.floor(timeline.shownSpan / timeline.tickStep) + 1 : 0
         Item {
             id: tick
             required property int index
@@ -87,11 +91,11 @@ Item {
         }
     }
 
-    // Track
+    // Track, as long as the video
     Rectangle {
         x: timeline.margin
         y: timeline.trackY
-        width: timeline.width - 2 * timeline.margin
+        width: Math.max(0, timeline.msToX(timeline.duration) - x)
         height: timeline.trackHeight
         radius: 4
         color: Qt.darker(timeline.palette.window, 1.6)
@@ -117,7 +121,7 @@ Item {
     Rectangle {
         x: timeline.msToX(timeline.effectiveEnd)
         y: timeline.trackY + 1
-        width: Math.max(0, timeline.width - timeline.margin - x)
+        width: Math.max(0, timeline.msToX(timeline.duration) - x)
         height: timeline.trackHeight - 2
         color: "#70000000"
     }
@@ -212,7 +216,8 @@ Item {
         onExited: hoverX = -1
 
         function apply(x: real) {
-            const ms = timeline.xToMs(x)
+            // Within the video, past which there is nothing to see.
+            const ms = Math.min(timeline.xToMs(x), timeline.duration)
             switch (mode) {
             case "seek":
                 timeline.seekRequested(ms)

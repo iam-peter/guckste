@@ -11,6 +11,8 @@
 #include "core/WindowFinder.h"
 #include "core/SingleInstance.h"
 
+#include <QAudioBufferInput>
+#include <QAudioBufferOutput>
 #include <QFileInfo>
 #include <QMediaCaptureSession>
 #include <QMediaPlayer>
@@ -24,6 +26,8 @@
 #include <QMimeType>
 #include <QTest>
 #include <QVideoFrame>
+
+#include <cmath>
 
 using namespace Qt::StringLiterals;
 
@@ -48,6 +52,46 @@ private slots:
         QVERIFY(Encoding::canEncode(format));
         // And the choice is kept.
         QCOMPARE(Encoding::bestFormat().videoCodec(), format.videoCodec());
+    }
+
+    // YUV frames become images on the CPU, colors kept: NV12 as written
+    // for the encoder, and planar 4:2:0 as decoders give it.
+    void convertsYuvOnTheCpu()
+    {
+        QImage image(64, 32, QImage::Format_RGB32);
+        const QList<QColor> colors{Qt::red, Qt::green, Qt::blue, QColor(128, 128, 128)};
+        for (int i = 0; i < 4; ++i)
+            for (int y = 0; y < 32; ++y)
+                for (int x = 0; x < 16; ++x)
+                    image.setPixelColor(i * 16 + x, y, colors[i]);
+        const QImage back = VideoFrames::toImage(VideoFrames::toNV12(image));
+        QCOMPARE(back.size(), image.size());
+        const auto near = [](const QColor &a, const QColor &b) {
+            return std::abs(a.red() - b.red()) <= 8 && std::abs(a.green() - b.green()) <= 8
+                && std::abs(a.blue() - b.blue()) <= 8;
+        };
+        for (int i = 0; i < 4; ++i)
+            QVERIFY2(near(back.pixelColor(i * 16 + 8, 16), colors[i]), qPrintable(back.pixelColor(i * 16 + 8, 16).name()));
+        // A region only.
+        const QImage part = VideoFrames::toImage(VideoFrames::toNV12(image), QRect(16, 0, 16, 8));
+        QCOMPARE(part.size(), QSize(16, 8));
+        QVERIFY(near(part.pixelColor(8, 4), Qt::green));
+
+        // Planar, BT.601 video range: Y 81, U 90, V 240 is red.
+        QVideoFrameFormat format(QSize(4, 4), QVideoFrameFormat::Format_YUV420P);
+        format.setColorSpace(QVideoFrameFormat::ColorSpace_BT601);
+        format.setColorRange(QVideoFrameFormat::ColorRange_Video);
+        QVideoFrame planar(format);
+        QVERIFY(planar.map(QVideoFrame::WriteOnly));
+        for (int y = 0; y < 4; ++y)
+            memset(planar.bits(0) + y * planar.bytesPerLine(0), 81, 4);
+        for (int y = 0; y < 2; ++y) {
+            memset(planar.bits(1) + y * planar.bytesPerLine(1), 90, 2);
+            memset(planar.bits(2) + y * planar.bytesPerLine(2), 240, 2);
+        }
+        planar.unmap();
+        const QColor red = VideoFrames::toImage(planar).pixelColor(1, 1);
+        QVERIFY2(near(red, Qt::red), qPrintable(red.name()));
     }
 
     void cropsFrames()
@@ -213,6 +257,144 @@ private slots:
         return recorder.actualLocation().toLocalFile();
     }
 
+    // A video as a clip at the canvas's origin, as the editor opens one.
+    static Annotation clipOf(const QString &path, int ms, QPointF at = {}, int startMs = 0)
+    {
+        static int next = 1;
+        Annotation clip;
+        clip.type = Annotation::Type::Video;
+        clip.source = path;
+        clip.sourceMs = ms;
+        clip.startMs = startMs;
+        clip.endMs = startMs + ms;
+        clip.clip = next++;
+        clip.image = QImage(320, 240, QImage::Format_ARGB32_Premultiplied);
+        clip.image.fill(Qt::black);
+        clip.points = {at, at + QPointF(320, 240)};
+        return clip;
+    }
+
+    static VideoExporter::Job jobOf(const QString &target, const QList<Annotation> &layers)
+    {
+        VideoExporter::Job job;
+        job.target = target;
+        job.layers = layers;
+        for (const Annotation &a : layers) {
+            if (a.isPicture())
+                job.canvas |= a.rect().toAlignedRect();
+        }
+        return job;
+    }
+
+    // The first frame after `afterUs` of a video, read back.
+    static QImage frameOf(const QString &path, qint64 afterUs, qint64 *duration = nullptr)
+    {
+        QMediaPlayer player;
+        QVideoSink sink;
+        player.setVideoSink(&sink);
+        QImage seen;
+        QObject::connect(&sink, &QVideoSink::videoFrameChanged, &sink, [&seen, afterUs](const QVideoFrame &f) {
+            if (seen.isNull() && f.isValid() && f.startTime() >= afterUs)
+                seen = f.toImage();
+        });
+        player.setSource(QUrl::fromLocalFile(path));
+        if (!QTest::qWaitFor([&player] { return player.mediaStatus() == QMediaPlayer::LoadedMedia; }, 10000))
+            return {};
+        if (duration)
+            *duration = player.duration();
+        player.play();
+        if (!QTest::qWaitFor([&seen] { return !seen.isNull(); }, 10000))
+            qWarning("No frame after %lld µs in %s", afterUs, qPrintable(path));
+        player.stop();
+        return seen;
+    }
+
+    // A second of a color with a tone, `hz` high, for mixing.
+    static QString writeVideoWithSound(const QString &path, const QColor &color, int hz)
+    {
+        QMediaCaptureSession session;
+        QVideoFrameInput video;
+        QAudioBufferInput audio;
+        QMediaRecorder recorder;
+        session.setVideoFrameInput(&video);
+        session.setAudioBufferInput(&audio);
+        session.setRecorder(&recorder);
+        recorder.setMediaFormat(Encoding::bestFormat());
+        recorder.setVideoFrameRate(30);
+        recorder.setVideoResolution(QSize(320, 240));
+        recorder.setOutputLocation(QUrl::fromLocalFile(path));
+        recorder.record();
+        QImage image(320, 240, QImage::Format_RGB32);
+        image.fill(color);
+        QAudioFormat format;
+        format.setSampleFormat(QAudioFormat::Float);
+        format.setSampleRate(48000);
+        format.setChannelCount(2);
+        format.setChannelConfig(QAudioFormat::ChannelConfigStereo);
+        // A tenth of a second of sound with every third frame.
+        for (int i = 0; i < 30; ++i) {
+            QVideoFrame frame = VideoFrames::toNV12(image);
+            frame.setStartTime(i * 33333);
+            frame.setEndTime((i + 1) * 33333);
+            if (!QTest::qWaitFor([&video, &frame] { return video.sendVideoFrame(frame); }, 5000))
+                return {};
+            if (i % 3 == 0) {
+                const int first = i / 3 * 4800;
+                QByteArray data(4800 * 2 * sizeof(float), Qt::Uninitialized);
+                auto *samples = reinterpret_cast<float *>(data.data());
+                for (int k = 0; k < 4800; ++k)
+                    samples[2 * k] = samples[2 * k + 1] = 0.5f * std::sin(2 * M_PI * hz * (first + k) / 48000.0);
+                const QAudioBuffer buffer(data, format, qint64(first) * 1000000 / 48000);
+                if (!QTest::qWaitFor([&audio, &buffer] { return audio.sendAudioBuffer(buffer); }, 5000))
+                    return {};
+            }
+        }
+        QTest::qWait(300);
+        recorder.stop();
+        if (!QTest::qWaitFor([&recorder] { return recorder.recorderState() == QMediaRecorder::StoppedState; }, 10000))
+            return {};
+        return recorder.actualLocation().toLocalFile();
+    }
+
+    // Clips with sound one after the other: the sound of each in its
+    // time, all through the video.
+    void exportsTheSoundOfClips()
+    {
+        QTemporaryDir dir;
+        const QString first = writeVideoWithSound(dir.path() + u"/first.mp4"_s, Qt::blue, 440);
+        const QString second = writeVideoWithSound(dir.path() + u"/second.mp4"_s, Qt::green, 880);
+        QVERIFY(!first.isEmpty() && !second.isEmpty());
+        VideoExporter exporter;
+        QSignalSpy finished(&exporter, &VideoExporter::finished);
+        QSignalSpy failed(&exporter, &VideoExporter::failed);
+        const VideoExporter::Job job = jobOf(dir.path() + u"/out.mp4"_s,
+                                             {clipOf(first, 1000), clipOf(second, 1000, {}, 1000)});
+        QVERIFY(exporter.start(job));
+        QTRY_VERIFY_WITH_TIMEOUT(finished.count() > 0 || failed.count() > 0, 30000);
+        QVERIFY2(failed.isEmpty(), failed.isEmpty() ? "" : qPrintable(failed.first().first().toString()));
+
+        // Played back: loud in both halves.
+        QMediaPlayer player;
+        QAudioBufferOutput out;
+        player.setAudioBufferOutput(&out);
+        qreal loudFirst = 0, loudSecond = 0;
+        connect(&out, &QAudioBufferOutput::audioBufferReceived, this, [&](const QAudioBuffer &buffer) {
+            qreal peak = 0;
+            for (qsizetype i = 0; i < buffer.frameCount(); ++i)
+                peak = qMax<qreal>(peak, std::abs(buffer.format().normalizedSampleValue(
+                                             buffer.constData<char>() + i * buffer.format().bytesPerFrame())));
+            (buffer.startTime() < 900000 ? loudFirst : loudSecond) = qMax(buffer.startTime() < 900000 ? loudFirst : loudSecond, peak);
+        });
+        player.setSource(QUrl::fromLocalFile(job.target));
+        QTRY_COMPARE_WITH_TIMEOUT(player.mediaStatus(), QMediaPlayer::LoadedMedia, 10000);
+        QVERIFY(player.hasAudio());
+        QVERIFY2(player.duration() > 1800 && player.duration() < 2300, qPrintable(QString::number(player.duration())));
+        player.play();
+        QTRY_VERIFY_WITH_TIMEOUT(player.mediaStatus() == QMediaPlayer::EndOfMedia, 10000);
+        QVERIFY2(loudFirst > 0.3, qPrintable(QString::number(loudFirst)));
+        QVERIFY2(loudSecond > 0.3, qPrintable(QString::number(loudSecond)));
+    }
+
     void exportsWithMarksAndTrim()
     {
         QTemporaryDir dir;
@@ -222,17 +404,14 @@ private slots:
         VideoExporter exporter;
         QSignalSpy finished(&exporter, &VideoExporter::finished);
         QSignalSpy failed(&exporter, &VideoExporter::failed);
-        VideoExporter::Job job;
-        job.source = source;
-        job.target = dir.path() + u"/out.mp4"_s;
-        job.startMs = 500;
-        job.endMs = 1500;
         Annotation rect;
         rect.type = Annotation::Type::Rectangle;
         rect.points = {QPointF(40, 40), QPointF(200, 160)};
         rect.color = Qt::red;
         rect.size = 6;
-        job.annotations = {rect};
+        VideoExporter::Job job = jobOf(dir.path() + u"/out.mp4"_s, {clipOf(source, 3000), rect});
+        job.startMs = 500;
+        job.endMs = 1500;
         QVERIFY(exporter.start(job));
         QVERIFY(exporter.running());
         QTRY_VERIFY_WITH_TIMEOUT(finished.count() > 0 || failed.count() > 0, 30000);
@@ -265,9 +444,7 @@ private slots:
         const QString plain = writeVideo(dir.path() + u"/plain.mp4"_s, 30, Qt::green);
         VideoExporter mover;
         QSignalSpy moved(&mover, &VideoExporter::finished);
-        VideoExporter::Job copy;
-        copy.source = plain;
-        copy.target = dir.path() + u"/moved.mp4"_s;
+        VideoExporter::Job copy = jobOf(dir.path() + u"/moved.mp4"_s, {clipOf(plain, 1000)});
         copy.moveSource = true;
         QVERIFY(mover.start(copy));
         QCOMPARE(moved.count(), 1);
@@ -285,9 +462,6 @@ private slots:
         VideoExporter exporter;
         QSignalSpy finished(&exporter, &VideoExporter::finished);
         QSignalSpy failed(&exporter, &VideoExporter::failed);
-        VideoExporter::Job job;
-        job.source = source;
-        job.target = dir.path() + u"/out.mp4"_s;
         Annotation early;
         early.type = Annotation::Type::Marker;
         early.points = {QPointF(0, 0), QPointF(160, 240)};
@@ -298,7 +472,7 @@ private slots:
         late.color = Qt::green;
         late.startMs = 1000;
         late.endMs = -1;
-        job.annotations = {early, late};
+        const VideoExporter::Job job = jobOf(dir.path() + u"/out.mp4"_s, {clipOf(source, 2000), early, late});
         QVERIFY(exporter.start(job));
         QTRY_VERIFY_WITH_TIMEOUT(finished.count() > 0 || failed.count() > 0, 30000);
         QVERIFY2(failed.isEmpty(), failed.isEmpty() ? "" : qPrintable(failed.first().first().toString()));
@@ -340,14 +514,11 @@ private slots:
         VideoExporter exporter;
         QSignalSpy finished(&exporter, &VideoExporter::finished);
         QSignalSpy failed(&exporter, &VideoExporter::failed);
-        VideoExporter::Job job;
-        job.source = source;
-        job.target = dir.path() + u"/out.mp4"_s;
         Annotation blur;
         blur.type = Annotation::Type::Pixelate;
         blur.points = {QPointF(0, 0), QPointF(160, 240)};
         blur.size = 10;
-        job.annotations = {blur};
+        const VideoExporter::Job job = jobOf(dir.path() + u"/out.mp4"_s, {clipOf(source, 1000), blur});
         QVERIFY(exporter.start(job));
         QTRY_VERIFY_WITH_TIMEOUT(finished.count() > 0 || failed.count() > 0, 30000);
         QVERIFY2(failed.isEmpty(), failed.isEmpty() ? "" : qPrintable(failed.first().first().toString()));
@@ -375,6 +546,62 @@ private slots:
         };
         QVERIFY2(spread(220) > 100, qPrintable(QString::number(spread(220))));
         QVERIFY2(spread(60) < 60, qPrintable(QString::number(spread(60))));
+    }
+
+    // Two clips at once, side by side: each in its place on every frame.
+    void exportsClipsSideBySide()
+    {
+        QTemporaryDir dir;
+        const QString left = writeVideo(dir.path() + u"/left.mp4"_s, 30, Qt::blue);
+        const QString right = writeVideo(dir.path() + u"/right.mp4"_s, 30, Qt::green);
+        QVERIFY(!left.isEmpty() && !right.isEmpty());
+        VideoExporter exporter;
+        QSignalSpy finished(&exporter, &VideoExporter::finished);
+        QSignalSpy failed(&exporter, &VideoExporter::failed);
+        const VideoExporter::Job job = jobOf(dir.path() + u"/out.mp4"_s,
+                                             {clipOf(left, 1000), clipOf(right, 1000, QPointF(320, 0))});
+        QCOMPARE(job.canvas, QRect(0, 0, 640, 240));
+        QVERIFY(exporter.start(job));
+        QTRY_VERIFY_WITH_TIMEOUT(finished.count() > 0 || failed.count() > 0, 30000);
+        QVERIFY2(failed.isEmpty(), failed.isEmpty() ? "" : qPrintable(failed.first().first().toString()));
+
+        qint64 duration = 0;
+        const QImage frame = frameOf(job.target, 300000, &duration);
+        QVERIFY(!frame.isNull());
+        QCOMPARE(frame.size(), QSize(640, 240));
+        QVERIFY2(duration > 800 && duration < 1300, qPrintable(QString::number(duration)));
+        const QColor a = frame.pixelColor(160, 120);
+        const QColor b = frame.pixelColor(480, 120);
+        QVERIFY2(a.blue() > 150 && a.green() < 100, qPrintable(a.name()));
+        QVERIFY2(b.green() > 150 && b.blue() < 100, qPrintable(b.name()));
+    }
+
+    // Two clips one after the other: the second's frames follow the
+    // first's, and the video is as long as both.
+    void exportsClipsInSequence()
+    {
+        QTemporaryDir dir;
+        const QString first = writeVideo(dir.path() + u"/first.mp4"_s, 30, Qt::blue);
+        const QString second = writeVideo(dir.path() + u"/second.mp4"_s, 30, Qt::green);
+        QVERIFY(!first.isEmpty() && !second.isEmpty());
+        VideoExporter exporter;
+        QSignalSpy finished(&exporter, &VideoExporter::finished);
+        QSignalSpy failed(&exporter, &VideoExporter::failed);
+        const VideoExporter::Job job = jobOf(dir.path() + u"/out.mp4"_s,
+                                             {clipOf(first, 1000), clipOf(second, 1000, {}, 1000)});
+        QVERIFY(exporter.start(job));
+        QTRY_VERIFY_WITH_TIMEOUT(finished.count() > 0 || failed.count() > 0, 30000);
+        QVERIFY2(failed.isEmpty(), failed.isEmpty() ? "" : qPrintable(failed.first().first().toString()));
+
+        qint64 duration = 0;
+        const QImage early = frameOf(job.target, 200000, &duration);
+        const QImage late = frameOf(job.target, 1400000);
+        QVERIFY2(duration > 1800 && duration < 2300, qPrintable(QString::number(duration)));
+        QVERIFY(!early.isNull() && !late.isNull());
+        const QColor a = early.pixelColor(160, 120);
+        const QColor b = late.pixelColor(160, 120);
+        QVERIFY2(a.blue() > 150 && a.green() < 100, qPrintable(a.name()));
+        QVERIFY2(b.green() > 150 && b.blue() < 100, qPrintable(b.name()));
     }
 
     void paintsTheCursor()

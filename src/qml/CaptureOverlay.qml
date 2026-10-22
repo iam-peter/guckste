@@ -732,10 +732,12 @@ Window {
                 ]
                 IconButton {
                     required property var modelData
+                    objectName: "mode-" + modelData.mode
                     iconName: modelData.icon
                     text: modelData.text
                     tip: modelData.tip
-                    checkable: true
+                    // Shows the mode rather than toggling: a click on the
+                    // one in use leaves it in use.
                     checked: root.pickMode === modelData.mode
                     enabled: modelData.mode !== "previous" || root.lastRegion.width > 0
                     onClicked: root.setPickMode(modelData.mode)

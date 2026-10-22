@@ -126,6 +126,7 @@ void AnnotationPainter::paint(const Annotation &a)
         paintMeasure(a);
         break;
     case Annotation::Type::Image:
+    case Annotation::Type::Video:
         paintImage(a);
         break;
     }
@@ -185,9 +186,13 @@ void AnnotationPainter::paintPixelate(const Annotation &a)
 
 void AnnotationPainter::paintImage(const Annotation &a)
 {
-    if (a.image.isNull())
-        return;
     const QRectF rect = a.rect();
+    if (a.image.isNull()) {
+        // A clip before its first frame is decoded.
+        if (a.type == Annotation::Type::Video)
+            m_painter.fillRect(map(rect), QColor(24, 24, 24));
+        return;
+    }
     // Enlarged with the view, pixels stay blocks like the screenshot's;
     // an image resized by hand or shrunk is smoothed.
     const bool resized = std::abs(rect.width() - a.image.width()) > 0.5 || std::abs(rect.height() - a.image.height()) > 0.5;
@@ -299,6 +304,7 @@ QRectF AnnotationPainter::bounds(const Annotation &a) const
         break;
     }
     case Annotation::Type::Image:
+    case Annotation::Type::Video:
         return a.rect();
     case Annotation::Type::Arrow: {
         painted = map(a.geometryBounds());

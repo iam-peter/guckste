@@ -24,7 +24,7 @@ void AnnotationLayer::setDocument(Document *document)
         connect(m_document, &Document::changed, this, [this] { update(); });
         connect(m_document, &Document::imageChanged, this, [this] { update(); });
         connect(m_document, &Document::timeChanged, this, [this] { update(); });
-        connect(m_document, &Document::backdropChanged, this, [this] { update(); });
+        connect(m_document, &Document::framesChanged, this, [this] { update(); });
         connect(m_document, &QObject::destroyed, this, [this] {
             m_document = nullptr;
             emit documentChanged();
@@ -137,8 +137,8 @@ void AnnotationLayer::paint(QPainter *painter)
         painter->restore();
     }
 
-    // The screenshot itself is the Image item below; this draws what is
-    // on it, added images included.
+    // A screenshot not yet a layer is the Image item below; this draws
+    // what is on it, images and clips included.
     m_document->paintLayers(*painter, m_zoom, m_origin, -1, false, m_hiddenIndex, true);
     const QList<Annotation> &list = m_document->annotations();
     const int selected = m_document->selectedIndex();

@@ -6,6 +6,7 @@
 #include "core/Encoding.h"
 #include "core/ScreenRecorder.h"
 #include "core/VideoExporter.h"
+#include "core/VideoProbe.h"
 #include "core/WindowFinder.h"
 
 #include <QAction>
@@ -40,7 +41,7 @@ App::App(QQmlEngine *engine, QObject *parent)
         if (m_recordingControls)
             m_recordingControls->close();
         if (Preferences::instance()->editAfterRecording()) {
-            openVideoEditor(path, m_recorder->firstFrame(), true);
+            openVideoEditor(path, true);
             return;
         }
         if (Preferences::instance()->copyPathAfterSave())
@@ -76,10 +77,18 @@ void App::setupTray()
         return;
     }
     m_trayMenu = std::make_unique<QMenu>();
+    // The menu may be drawn by the panel, over D-Bus, and close on its own
+    // time with no aboutToHide here: picked from it, the capture waits.
     auto *takeShot = m_trayMenu->addAction(tr("Take Screenshot"));
-    connect(takeShot, &QAction::triggered, this, &App::capture);
+    connect(takeShot, &QAction::triggered, this, [this] {
+        m_trayMenuClosed.start();
+        capture();
+    });
     m_recordAction = m_trayMenu->addAction(tr("Record Screen…"));
-    connect(m_recordAction, &QAction::triggered, this, &App::toggleRecording);
+    connect(m_recordAction, &QAction::triggered, this, [this] {
+        m_trayMenuClosed.start();
+        toggleRecording();
+    });
     auto *open = m_trayMenu->addAction(tr("Open Image…"));
     connect(open, &QAction::triggered, this, &App::openImage);
     m_trayMenu->addSeparator();
@@ -210,7 +219,7 @@ void App::openOverlay(bool recordMode, const QRect &presetRegion, int minimumWai
     }
     // Right after picking from the tray menu, the menu may still be on
     // screen; let it go first. From a shortcut there is nothing to wait for.
-    constexpr int menuFadeMs = 150;
+    constexpr int menuFadeMs = 300;
     int wait = 0;
     if (m_trayMenuClosed.isValid() && m_trayMenuClosed.elapsed() < menuFadeMs)
         wait = menuFadeMs - int(m_trayMenuClosed.elapsed());
@@ -348,7 +357,7 @@ bool App::openEditor(const QString &path)
             notify(tr("Could not open video"), path);
             return false;
         }
-        openVideoEditor(path, QImage(), false);
+        openVideoEditor(path, false);
         return true;
     }
     auto *document = new Document;
@@ -395,13 +404,16 @@ void App::addToDocument(Document *target, Document *source, const QRectF &region
     closeOverlay();
 }
 
-void App::showEditor(Document *document)
+QQuickWindow *App::showEditor(Document *document, const QVariantMap &properties)
 {
-    QQuickWindow *editor = createWindow(QStringLiteral("EditorWindow"),
-                                        {{QStringLiteral("document"), QVariant::fromValue(document)}});
+    // The screenshot as a layer like any other, locked to begin with.
+    document->liftBase(document->filePath().isEmpty() ? tr("Screenshot") : QFileInfo(document->filePath()).fileName());
+    QVariantMap all = properties;
+    all.insert(QStringLiteral("document"), QVariant::fromValue(document));
+    QQuickWindow *editor = createWindow(QStringLiteral("EditorWindow"), all);
     if (!editor) {
         delete document;
-        return;
+        return nullptr;
     }
     document->setParent(editor);
     m_editors.append(editor);
@@ -409,6 +421,7 @@ void App::showEditor(Document *document)
     editor->show();
     editor->raise();
     editor->requestActivate();
+    return editor;
 }
 
 void App::startRecording(const QRectF &region)
@@ -466,60 +479,61 @@ QString App::recordingSuffix() const
     return Encoding::suffixFor(Encoding::bestFormat());
 }
 
-void App::exportRecording(VideoExporter *exporter, const QString &source, const QString &target, Document *document,
-                          int startMs, int endMs, bool moveSource)
+void App::exportVideo(VideoExporter *exporter, const QString &target, Document *document, int startMs, int endMs,
+                      const QString &movable)
 {
     if (!exporter || !document)
         return;
     VideoExporter::Job job;
-    job.moveSource = moveSource;
-    job.source = source;
+    const QList<Annotation> &layers = document->annotations();
+    job.moveSource = !movable.isEmpty() && layers.size() == 1 && layers.first().source == movable;
     job.target = target;
     job.startMs = startMs;
     job.endMs = endMs;
-    job.annotations = document->annotations();
+    job.layers = document->annotations();
+    job.canvas = document->canvas();
     job.quality = Preferences::instance()->recordingQuality();
     exporter->start(job);
 }
 
-bool App::isVideoFile(const QString &path)
+void App::openFrame(Document *document)
+{
+    if (document)
+        showEditor(document->frameDocument());
+}
+
+bool App::fileExists(const QString &path) const
+{
+    return QFileInfo::exists(path);
+}
+
+bool App::isVideoFile(const QString &path) const
 {
     static const QStringList suffixes{QStringLiteral("mp4"), QStringLiteral("webm"), QStringLiteral("mkv"),
                                       QStringLiteral("avi"), QStringLiteral("mov"), QStringLiteral("m4v")};
     return suffixes.contains(QFileInfo(path).suffix().toLower());
 }
 
-void App::openVideoEditor(const QString &path, const QImage &preview, bool temporary)
+void App::openVideoEditor(const QString &path, bool temporary)
 {
-    auto *document = new Document;
-    document->setImage(preview);
-    auto *exporter = new VideoExporter;
-    QQuickWindow *editor = createWindow(QStringLiteral("VideoEditorWindow"),
-                                        {{QStringLiteral("document"), QVariant::fromValue(document)},
-                                         {QStringLiteral("sourcePath"), path},
-                                         {QStringLiteral("exporter"), QVariant::fromValue(exporter)},
-                                         {QStringLiteral("temporary"), temporary}});
-    if (!editor) {
-        delete document;
-        delete exporter;
-        if (temporary)
-            notify(tr("Recording saved"), path);
-        return;
-    }
-    document->setParent(editor);
-    exporter->setParent(editor);
-    // A recording that was never saved is not kept.
-    if (temporary) {
-        connect(editor, &QWindow::visibleChanged, editor, [editor, path](bool visible) {
-            if (!visible && !editor->property("saved").toBool())
-                QFile::remove(path);
-        });
-    }
-    m_editors.append(editor);
-    m_editors.removeAll(nullptr);
-    editor->show();
-    editor->raise();
-    editor->requestActivate();
+    VideoProbe::probe(path, this, [this, path, temporary](const VideoInfo &video) {
+        auto *document = new Document;
+        if (document->addVideo(video, Document::Placement::Base) < 0) {
+            delete document;
+            notify(temporary ? tr("Recording saved") : tr("Could not open video"), path);
+            return;
+        }
+        QQuickWindow *editor = showEditor(document, {{QStringLiteral("temporaryVideo"), temporary ? path : QString()}});
+        // A recording is not kept unless it was saved by moving it, which
+        // clears the editor's temporaryVideo.
+        if (editor && temporary) {
+            connect(editor, &QWindow::visibleChanged, editor, [editor](bool visible) {
+                const QString left = editor->property("temporaryVideo").toString();
+                if (!visible && !left.isEmpty())
+                    QFile::remove(left);
+            });
+        }
+    });
 }
 
 void App::updateTrayForRecording()

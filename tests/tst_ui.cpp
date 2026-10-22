@@ -7,6 +7,7 @@
 #include "core/VideoFrames.h"
 #include "core/Preferences.h"
 #include "core/VideoExporter.h"
+#include "core/VideoProbe.h"
 #include "ui/App.h"
 #include "ui/DocumentImageProvider.h"
 
@@ -24,9 +25,12 @@
 #include <QQuickStyle>
 #include <QQuickWindow>
 #include <QSettings>
+#include <QSignalSpy>
 #include <QStandardPaths>
 #include <QTest>
 #include <QWheelEvent>
+
+#include <functional>
 #include <QtQml/qqmlextensionplugin.h>
 #include <QtQuickTest/quicktest.h>
 
@@ -679,6 +683,29 @@ private slots:
         QMetaObject::invokeMethod(window, "setPickMode", Q_ARG(QString, u"window"_s));
         QVERIFY(!window->property("hasSelection").toBool());
         QCOMPARE(prefs->pickMode(), u"window"_s);
+
+        // Its button, clicked again, stays checked: one mode is always shown.
+        window->show();
+        QVERIFY(QTest::qWaitForWindowExposed(window));
+        const std::function<QQuickItem *(QQuickItem *, const QString &)> find
+            = [&](QQuickItem *item, const QString &name) -> QQuickItem * {
+            if (item->objectName() == name)
+                return item;
+            for (QQuickItem *child : item->childItems()) {
+                if (QQuickItem *found = find(child, name))
+                    return found;
+            }
+            return nullptr;
+        };
+        QQuickItem *button = nullptr;
+        QTRY_VERIFY((button = find(window->contentItem(), u"mode-window"_s)) && button->isVisible());
+        QVERIFY(button->property("checked").toBool());
+        const QPoint middle = button->mapToScene(QPointF(button->width() / 2, button->height() / 2)).toPoint();
+        QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier, middle);
+        QCOMPARE(window->property("pickMode").toString(), u"window"_s);
+        QVERIFY(button->property("checked").toBool());
+        QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier, middle);
+        QVERIFY(button->property("checked").toBool());
         delete window;
 
         prefs->setLastRegion(QRect(10, 20, 300, 200));
@@ -882,50 +909,114 @@ private slots:
         delete window;
     }
 
+    // What a video file holds, read as the app reads it.
+    static VideoInfo probed(const QString &path)
+    {
+        VideoInfo info;
+        bool done = false;
+        QObject context;
+        VideoProbe::probe(path, &context, [&](const VideoInfo &video) {
+            info = video;
+            done = true;
+        });
+        if (!QTest::qWaitFor([&done] { return done; }, 10000))
+            qWarning("No answer about %s", qPrintable(path));
+        return info;
+    }
+
+    // The editor on a video, as the app opens one.
+    QQuickWindow *videoEditor(const QString &clip, Document *&document)
+    {
+        document = new Document;
+        if (document->addVideo(probed(clip), Document::Placement::Base) < 0) {
+            delete document;
+            return nullptr;
+        }
+        QQmlComponent component(m_engine);
+        component.loadFromModule("Guckste", "EditorWindow");
+        auto *window = qobject_cast<QQuickWindow *>(
+            component.createWithInitialProperties({{u"document"_s, QVariant::fromValue(document)}}));
+        if (!window) {
+            qWarning("%s", qPrintable(component.errorString()));
+            delete document;
+            return nullptr;
+        }
+        document->setParent(window);
+        return window;
+    }
+
     // Play plays: the position runs on, and the button turns to pause.
     void videoEditorPlays()
     {
         QTemporaryDir dir;
-        const QString clip = writeVideo(dir.path() + u"/clip.mp4"_s, 90, Qt::darkCyan);
+        // A real recording instead, to look at: GUCKSTE_TEST_VIDEO.
+        const QString given = qEnvironmentVariable("GUCKSTE_TEST_VIDEO");
+        const QString clip = !given.isEmpty() ? given : writeVideo(dir.path() + u"/clip.mp4"_s, 90, Qt::darkCyan);
         QVERIFY(!clip.isEmpty());
-        auto *document = new Document;
-        auto *exporter = new VideoExporter;
-        QQmlComponent component(m_engine);
-        component.loadFromModule("Guckste", "VideoEditorWindow");
-        auto *window = qobject_cast<QQuickWindow *>(component.createWithInitialProperties(
-            {{u"document"_s, QVariant::fromValue(document)}, {u"sourcePath"_s, clip},
-             {u"exporter"_s, QVariant::fromValue(exporter)}}));
-        QVERIFY2(window, qPrintable(component.errorString()));
-        document->setParent(window);
-        exporter->setParent(window);
+        Document *document = nullptr;
+        QQuickWindow *window = videoEditor(clip, document);
+        QVERIFY(window);
         window->show();
         QVERIFY(QTest::qWaitForWindowExposed(window));
-        auto *player = window->findChild<QMediaPlayer *>(u"player"_s);
+        auto *playback = window->findChild<QObject *>(u"playback"_s);
         auto *play = window->findChild<QQuickItem *>(u"playButton"_s);
-        QVERIFY(player && play);
-        QTRY_VERIFY_WITH_TIMEOUT(player->duration() > 2000, 5000);
+        QVERIFY(playback && play);
+        QVERIFY(window->property("videoMode").toBool());
+        QTRY_VERIFY_WITH_TIMEOUT(playback->property("duration").toInt() > 2000, 5000);
         QTest::qWait(500);
+        // The first frame is on screen before anything plays.
+        QTRY_VERIFY_WITH_TIMEOUT(document->clipImage(document->annotations().first()).pixelColor(10, 10)
+                                     != QColor(Qt::black), 5000);
 
         const QPoint at = play->mapToScene(QPointF(play->width() / 2, play->height() / 2)).toPoint();
         QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier, at);
         QTest::qWait(1000);
-        QCOMPARE(player->playbackState(), QMediaPlayer::PlayingState);
-        QVERIFY(player->position() > 300);
+        QVERIFY(playback->property("playing").toBool());
+        QVERIFY(playback->property("position").toInt() > 300);
+        QCOMPARE(document->time(), playback->property("position").toInt());
+        // What is on screen is the clip, drawn whole: its frames are not
+        // converted on a GPU context of their own, which with OpenGL
+        // threw the window's drawing into disarray.
+        auto *area = window->findChild<QQuickItem *>(u"drawingArea"_s);
+        QVERIFY(area);
+        const auto shownAt = [&](qreal x, qreal y) {
+            QPointF p;
+            QMetaObject::invokeMethod(area, "toView", Q_RETURN_ARG(QPointF, p), Q_ARG(double, x), Q_ARG(double, y));
+            return window->grabWindow().pixelColor(area->mapToScene(p).toPoint());
+        };
+        saveScreenshot(window, u"video-playing"_s);
+        // Held playing, to be looked at on screen.
+        if (const int hold = qEnvironmentVariableIntValue("GUCKSTE_TEST_HOLD"); hold > 0)
+            QTest::qWait(hold);
+        for (const QPointF at : given.isEmpty() ? QList<QPointF>{QPointF(20, 20), QPointF(160, 120), QPointF(300, 220)} : QList<QPointF>()) {
+            const QColor seen = shownAt(at.x(), at.y());
+            QVERIFY2(std::abs(seen.red() - 0) < 40 && std::abs(seen.green() - 128) < 40 && std::abs(seen.blue() - 128) < 40,
+                     qPrintable(seen.name()));
+        }
 
         // Again: paused where it was; once more: on from there.
         QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier, at);
-        QTRY_COMPARE(player->playbackState(), QMediaPlayer::PausedState);
-        const qint64 paused = player->position();
+        QTRY_VERIFY(!playback->property("playing").toBool());
+        const int paused = playback->property("position").toInt();
         QTest::qWait(300);
-        QVERIFY(std::abs(player->position() - paused) < 100);
+        QCOMPARE(playback->property("position").toInt(), paused);
         QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier, at);
         QTest::qWait(500);
-        QCOMPARE(player->playbackState(), QMediaPlayer::PlayingState);
-        QVERIFY(player->position() > paused + 200);
+        QVERIFY(playback->property("playing").toBool());
+        QVERIFY(playback->property("position").toInt() > paused + 200);
+
+        // At the very end the clip is still on screen, on its last frame.
+        QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier, at);
+        const int duration = playback->property("duration").toInt();
+        playback->setProperty("position", duration);
+        QCOMPARE(playback->property("position").toInt(), duration);
+        QCOMPARE(document->time(), duration - 1);
+        QVERIFY(document->isShown(0));
 
         window->setProperty("discardConfirmed", true);
         window->close();
         QTRY_VERIFY(!window->isVisible());
+        delete window;
     }
 
     // Each mark on a recording gets a lane: its bar's edges set when it
@@ -935,35 +1026,29 @@ private slots:
         QTemporaryDir dir;
         const QString clip = writeVideo(dir.path() + u"/clip.mp4"_s, 120, Qt::darkCyan);
         QVERIFY(!clip.isEmpty());
-        auto *document = new Document;
-        auto *exporter = new VideoExporter;
-        QQmlComponent component(m_engine);
-        component.loadFromModule("Guckste", "VideoEditorWindow");
-        auto *window = qobject_cast<QQuickWindow *>(component.createWithInitialProperties(
-            {{u"document"_s, QVariant::fromValue(document)}, {u"sourcePath"_s, clip},
-             {u"exporter"_s, QVariant::fromValue(exporter)}}));
-        QVERIFY2(window, qPrintable(component.errorString()));
-        document->setParent(window);
-        exporter->setParent(window);
+        Document *document = nullptr;
+        QQuickWindow *window = videoEditor(clip, document);
+        QVERIFY(window);
         window->resize(1000, 700);
         window->show();
         QVERIFY(QTest::qWaitForWindowExposed(window));
-        auto *player = window->findChild<QMediaPlayer *>(u"player"_s);
+        auto *playback = window->findChild<QObject *>(u"playback"_s);
         auto *lanes = window->findChild<QQuickItem *>(u"lanes"_s);
         auto *timeline = window->findChild<QQuickItem *>(u"timeline"_s);
-        QVERIFY(player && lanes && timeline);
-        QTRY_VERIFY_WITH_TIMEOUT(player->duration() > 3500, 5000);
+        QVERIFY(playback && lanes && timeline);
+        QTRY_VERIFY_WITH_TIMEOUT(playback->property("duration").toInt() > 3500, 5000);
         QTRY_COMPARE(document->time(), 0);
 
+        // The clip is layer 0; the marks go above it.
         document->beginAnnotation(Document::Rectangle, 20, 20, Qt::red, 3);
         document->updateAnnotation(120, 100, false);
         document->commitAnnotation();
         document->addText(150, 40, u"Later"_s, Qt::yellow, 24);
-        QTRY_COMPARE(lanes->property("count").toInt(), 2);
+        QTRY_COMPARE(lanes->property("count").toInt(), 3);
         // Laid out, so the bars are where they will be pressed.
         QTest::qWait(100);
-        QCOMPARE(document->annotationStart(0), 0);
-        QCOMPARE(document->annotationEnd(0), -1);
+        QCOMPARE(document->annotationStart(1), 0);
+        QCOMPARE(document->annotationEnd(1), -1);
 
         // Lane rows are topmost first: the rectangle's is the second.
         const auto at = [&](int ms, int row) {
@@ -972,22 +1057,22 @@ private slots:
             const qreal y = (row + 0.5) * lanes->property("laneHeight").toReal();
             return lanes->mapToScene(QPointF(x, y)).toPoint();
         };
-        const int duration = int(player->duration());
+        const int duration = playback->property("duration").toInt();
 
         // The rectangle's out edge, dragged in to 1.5 s.
         QTest::mousePress(window, Qt::LeftButton, Qt::NoModifier, at(duration, 1) - QPoint(2, 0));
         QTest::mouseMove(window, at(2500, 1));
         QTest::mouseMove(window, at(1500, 1));
         QTest::mouseRelease(window, Qt::LeftButton, Qt::NoModifier, at(1500, 1));
-        QVERIFY2(std::abs(document->annotationEnd(0) - 1500) < 60, qPrintable(QString::number(document->annotationEnd(0))));
-        QCOMPARE(document->annotationStart(0), 0);
-        QCOMPARE(document->selectedIndex(), 0);
+        QVERIFY2(std::abs(document->annotationEnd(1) - 1500) < 60, qPrintable(QString::number(document->annotationEnd(1))));
+        QCOMPARE(document->annotationStart(1), 0);
+        QCOMPARE(document->selectedIndex(), 1);
 
         // At 2 s it is gone, the text is still there.
-        player->setPosition(2000);
+        playback->setProperty("position", 2000);
         QTRY_COMPARE(document->time(), 2000);
-        QVERIFY(!document->isShown(0));
-        QVERIFY(document->isShown(1));
+        QVERIFY(!document->isShown(1));
+        QVERIFY(document->isShown(2));
 
         // The rectangle's bar moved a second on by its middle: it keeps
         // its length, and shows at 2 s again.
@@ -995,19 +1080,95 @@ private slots:
         QTest::mouseMove(window, at(1250, 1));
         QTest::mouseMove(window, at(1750, 1));
         QTest::mouseRelease(window, Qt::LeftButton, Qt::NoModifier, at(1750, 1));
-        QVERIFY2(std::abs(document->annotationStart(0) - 1000) < 60, qPrintable(QString::number(document->annotationStart(0))));
-        QVERIFY(std::abs((document->annotationEnd(0) - document->annotationStart(0)) - 1500) < 60);
-        QVERIFY(document->isShown(0));
+        QVERIFY2(std::abs(document->annotationStart(1) - 1000) < 60, qPrintable(QString::number(document->annotationStart(1))));
+        QVERIFY(std::abs((document->annotationEnd(1) - document->annotationStart(1)) - 1500) < 60);
+        QVERIFY(document->isShown(1));
         QTest::qWait(50);
         saveScreenshot(window, u"video-lanes"_s);
 
         // Right-click: the whole time again.
-        document->setAnnotationTiming(0, 0, -1);
-        QVERIFY(document->isShown(0));
+        document->setAnnotationTiming(1, 0, -1);
+        QVERIFY(document->isShown(1));
 
         window->setProperty("discardConfirmed", true);
         window->close();
         QTRY_VERIFY(!window->isVisible());
+        delete window;
+    }
+
+    // Dragged past the end, a mark or a clip makes the video longer: the
+    // timeline has room there, and more when a drag nears its edge.
+    void videoEditorTimelineGrows()
+    {
+        QTemporaryDir dir;
+        const QString clip = writeVideo(dir.path() + u"/clip.mp4"_s, 60, Qt::darkCyan);
+        QVERIFY(!clip.isEmpty());
+        Document *document = nullptr;
+        QQuickWindow *window = videoEditor(clip, document);
+        QVERIFY(window);
+        window->resize(1000, 700);
+        window->show();
+        QVERIFY(QTest::qWaitForWindowExposed(window));
+        auto *playback = window->findChild<QObject *>(u"playback"_s);
+        auto *lanes = window->findChild<QQuickItem *>(u"lanes"_s);
+        QVERIFY(playback && lanes);
+        QTRY_VERIFY_WITH_TIMEOUT(playback->property("duration").toInt() > 1500, 5000);
+        const int length = playback->property("duration").toInt();
+        // Room past the end.
+        QVERIFY(lanes->property("span").toInt() > length);
+
+        document->setLocked(0, false);
+        document->beginAnnotation(Document::Rectangle, 20, 20, Qt::red, 3);
+        document->updateAnnotation(120, 100, false);
+        document->commitAnnotation();
+        QTRY_COMPARE(lanes->property("count").toInt(), 2);
+        QTest::qWait(100);
+        const auto at = [&](int ms, int row) {
+            qreal x = 0;
+            QMetaObject::invokeMethod(lanes, "msToX", Q_RETURN_ARG(qreal, x), Q_ARG(int, ms));
+            const qreal y = (row + 0.5) * lanes->property("laneHeight").toReal();
+            return lanes->mapToScene(QPointF(x, y)).toPoint();
+        };
+
+        // The mark's end, from the end of the video to the end of the room
+        // and on: its end is past the video's, which grows to it.
+        const QPoint edge = at(length, 0) - QPoint(2, 0);
+        QTest::mousePress(window, Qt::LeftButton, Qt::NoModifier, edge);
+        const int span = lanes->property("span").toInt();
+        const QPoint end = at(span, 0) - QPoint(4, 0);
+        QTest::mouseMove(window, at(span, 0) - QPoint(30, 0));
+        // Moving about at the edge makes no room by itself; held there,
+        // a tenth or so a second.
+        for (int i = 0; i < 10; ++i)
+            QTest::mouseMove(window, end - QPoint(i % 2, 0));
+        QVERIFY(lanes->property("span").toInt() < span * 1.05);
+        QTest::qWait(1000);
+        const int grown = lanes->property("span").toInt();
+        QVERIFY2(grown > span * 1.05 && grown < span * 1.25, qPrintable(u"%1 to %2"_s.arg(span).arg(grown)));
+        QTest::mouseRelease(window, Qt::LeftButton, Qt::NoModifier, end);
+        QVERIFY2(document->annotationEnd(1) > length + 500, qPrintable(QString::number(document->annotationEnd(1))));
+        QCOMPARE(document->duration(), document->annotationEnd(1));
+        QTRY_COMPARE(playback->property("duration").toInt(), document->annotationEnd(1));
+        QCOMPARE(lanes->property("heldSpan").toInt(), 0);
+
+        // The clip, moved a second later by its bar: it starts there, as
+        // long as before.
+        QTest::qWait(50);
+        const QPoint middle = at(length / 2, 1);
+        QTest::mousePress(window, Qt::LeftButton, Qt::NoModifier, middle);
+        QTest::mouseMove(window, at(length / 2 + 500, 1));
+        QTest::mouseMove(window, at(length / 2 + 1000, 1));
+        QTest::mouseRelease(window, Qt::LeftButton, Qt::NoModifier, at(length / 2 + 1000, 1));
+        QVERIFY2(std::abs(document->annotationStart(0) - 1000) < 80, qPrintable(QString::number(document->annotationStart(0))));
+        QCOMPARE(document->annotationEnd(0) - document->annotationStart(0), length);
+        QVERIFY(document->duration() >= length + 900);
+        QTest::qWait(50);
+        saveScreenshot(window, u"video-timeline-grown"_s);
+
+        window->setProperty("discardConfirmed", true);
+        window->close();
+        QTRY_VERIFY(!window->isVisible());
+        delete window;
     }
 
     // Lanes selected together move and stretch together; many lanes
@@ -1017,34 +1178,28 @@ private slots:
         QTemporaryDir dir;
         const QString clip = writeVideo(dir.path() + u"/clip.mp4"_s, 120, Qt::darkCyan);
         QVERIFY(!clip.isEmpty());
-        auto *document = new Document;
-        auto *exporter = new VideoExporter;
-        QQmlComponent component(m_engine);
-        component.loadFromModule("Guckste", "VideoEditorWindow");
-        auto *window = qobject_cast<QQuickWindow *>(component.createWithInitialProperties(
-            {{u"document"_s, QVariant::fromValue(document)}, {u"sourcePath"_s, clip},
-             {u"exporter"_s, QVariant::fromValue(exporter)}}));
-        QVERIFY2(window, qPrintable(component.errorString()));
-        document->setParent(window);
-        exporter->setParent(window);
+        Document *document = nullptr;
+        QQuickWindow *window = videoEditor(clip, document);
+        QVERIFY(window);
         window->resize(1000, 700);
         window->show();
         QVERIFY(QTest::qWaitForWindowExposed(window));
-        auto *player = window->findChild<QMediaPlayer *>(u"player"_s);
+        auto *playback = window->findChild<QObject *>(u"playback"_s);
         auto *lanes = window->findChild<QQuickItem *>(u"lanes"_s);
         auto *panel = window->findChild<QQuickItem *>(u"bottomPanel"_s);
-        QVERIFY(player && lanes && panel);
-        QTRY_VERIFY_WITH_TIMEOUT(player->duration() > 3500, 5000);
+        QVERIFY(playback && lanes && panel);
+        QTRY_VERIFY_WITH_TIMEOUT(playback->property("duration").toInt() > 3500, 5000);
         QTRY_COMPARE(document->time(), 0);
 
-        // Three marks, each shown from 0.5 s to 1.5 s.
-        for (int i = 0; i < 3; ++i) {
+        // Three marks over the clip, layers 1 to 3, each shown from 0.5 s
+        // to 1.5 s.
+        for (int i = 1; i <= 3; ++i) {
             document->beginAnnotation(Document::Rectangle, 10 + i * 30, 10, Qt::red, 3);
             document->updateAnnotation(30 + i * 30, 40, false);
             document->commitAnnotation();
             document->setAnnotationTiming(i, 500, 1500);
         }
-        QTRY_COMPARE(lanes->property("count").toInt(), 3);
+        QTRY_COMPARE(lanes->property("count").toInt(), 4);
         QTest::qWait(100);
         const auto at = [&](int ms, int row) {
             qreal x = 0;
@@ -1053,7 +1208,7 @@ private slots:
             return lanes->mapToScene(QPointF(x, y)).toPoint();
         };
 
-        // Rows 0 and 2 (marks 2 and 0), picked with Ctrl, moved a second on.
+        // Rows 0 and 2 (marks 3 and 1), picked with Ctrl, moved a second on.
         QTest::mouseClick(window, Qt::LeftButton, Qt::ControlModifier, at(1000, 0));
         QTest::mouseClick(window, Qt::LeftButton, Qt::ControlModifier, at(1000, 2));
         QCOMPARE(lanes->property("chosen").toList().size(), 2);
@@ -1062,13 +1217,13 @@ private slots:
         QTest::mouseMove(window, at(2000, 0));
         QTest::mouseRelease(window, Qt::LeftButton, Qt::NoModifier, at(2000, 0));
         const auto near = [](int a, int b) { return std::abs(a - b) < 60; };
-        QVERIFY2(near(document->annotationStart(2), 1500), qPrintable(QString::number(document->annotationStart(2))));
-        QVERIFY(near(document->annotationStart(0), 1500));
-        QCOMPARE(document->annotationStart(1), 500);
+        QVERIFY2(near(document->annotationStart(3), 1500), qPrintable(QString::number(document->annotationStart(3))));
+        QVERIFY(near(document->annotationStart(1), 1500));
+        QCOMPARE(document->annotationStart(2), 500);
         // One undo step for both.
         document->undo();
-        QCOMPARE(document->annotationStart(2), 500);
-        QCOMPARE(document->annotationStart(0), 500);
+        QCOMPARE(document->annotationStart(3), 500);
+        QCOMPARE(document->annotationStart(1), 500);
 
         // Undo reset nothing about the selection; both stretched by their
         // out edges to 2.5 s.
@@ -1079,15 +1234,15 @@ private slots:
         QTest::mouseMove(window, at(2000, 1));
         QTest::mouseMove(window, at(2500, 1));
         QTest::mouseRelease(window, Qt::LeftButton, Qt::NoModifier, at(2500, 1));
-        QVERIFY2(near(document->annotationEnd(2), 2500), qPrintable(QString::number(document->annotationEnd(2))));
-        QVERIFY(near(document->annotationEnd(1), 2500));
-        QCOMPARE(document->annotationStart(1), 500);
-        QCOMPARE(document->annotationEnd(0), 1500);
+        QVERIFY2(near(document->annotationEnd(3), 2500), qPrintable(QString::number(document->annotationEnd(3))));
+        QVERIFY(near(document->annotationEnd(2), 2500));
+        QCOMPARE(document->annotationStart(2), 500);
+        QCOMPARE(document->annotationEnd(1), 1500);
 
         // Many marks: the lanes scroll.
         for (int i = 0; i < 6; ++i)
             document->addText(10, 100 + i * 10, u"More"_s, Qt::yellow, 12);
-        QTRY_COMPARE(lanes->property("count").toInt(), 9);
+        QTRY_COMPARE(lanes->property("count").toInt(), 10);
         QTest::qWait(100);
         QVERIFY(lanes->property("contentHeight").toReal() > lanes->height());
         const QPoint inLanes = lanes->mapToScene(QPointF(lanes->width() / 2, lanes->height() / 2)).toPoint();
@@ -1110,6 +1265,7 @@ private slots:
         window->setProperty("discardConfirmed", true);
         window->close();
         QTRY_VERIFY(!window->isVisible());
+        delete window;
     }
 
     // In every window, a selected mark takes the color and size picked
@@ -1119,16 +1275,14 @@ private slots:
         QTemporaryDir dir;
         const QString clip = writeVideo(dir.path() + u"/clip.mp4"_s, 30, Qt::darkCyan);
         QVERIFY(!clip.isEmpty());
-        for (const QString type : {u"EditorWindow"_s, u"VideoEditorWindow"_s, u"CaptureOverlay"_s}) {
+        const VideoInfo video = probed(clip);
+        for (const QString kind : {u"EditorWindow"_s, u"video"_s, u"CaptureOverlay"_s}) {
             auto *document = new Document;
             document->setImage(demoScreen(320, 240));
             QVariantMap properties{{u"document"_s, QVariant::fromValue(document)}};
-            if (type == u"VideoEditorWindow"_s) {
-                properties[u"sourcePath"_s] = clip;
-                properties[u"exporter"_s] = QVariant::fromValue(new VideoExporter(document));
-            } else if (type == u"CaptureOverlay"_s) {
+            const QString type = kind == u"video"_s ? u"EditorWindow"_s : kind;
+            if (kind == u"CaptureOverlay"_s)
                 properties[u"screenGeometry"_s] = QRect(0, 0, 320, 240);
-            }
             QQmlComponent component(m_engine);
             component.loadFromModule("Guckste", type.toUtf8());
             auto *window = qobject_cast<QQuickWindow *>(component.createWithInitialProperties(properties));
@@ -1143,7 +1297,12 @@ private slots:
             document->updateAnnotation(120, 80, false);
             document->commitAnnotation();
             document->addText(40, 120, u"Note"_s, Qt::yellow, 20);
-            QCOMPARE(document->annotationCount(), 2);
+            // With a clip beside, the editor is one for video.
+            if (kind == u"video"_s) {
+                QVERIFY(document->addVideo(video, Document::Placement::Beside) == 2);
+                QTRY_VERIFY(window->property("videoMode").toBool());
+            }
+            QVERIFY(document->annotationCount() >= 2);
 
             // Selected, the arrow shows its color and takes new ones.
             document->setSelectedIndex(0);
@@ -1176,29 +1335,134 @@ private slots:
         }
     }
 
-    void videoEditorLoads()
+    // One editor for both: with a clip in it, the timeline shows and a
+    // frame can be taken out as an image of its own; the clip it opened
+    // with is locked until it is unlocked in the layer list.
+    void editorTakesAFrame()
     {
-        auto *document = new Document;
-        document->setImage(demoScreen(320, 200));
-        auto *exporter = new VideoExporter;
-        QQmlComponent component(m_engine);
-        component.loadFromModule("Guckste", "VideoEditorWindow");
-        QVERIFY2(!component.isError(), qPrintable(component.errorString()));
-        QObject *object = component.createWithInitialProperties(
-            {{u"document"_s, QVariant::fromValue(document)},
-             {u"sourcePath"_s, QString()},
-             {u"exporter"_s, QVariant::fromValue(exporter)}});
-        QVERIFY2(object, qPrintable(component.errorString()));
-        auto *window = qobject_cast<QQuickWindow *>(object);
+        QTemporaryDir dir;
+        const QString clip = writeVideo(dir.path() + u"/clip.mp4"_s, 60, Qt::darkCyan);
+        QVERIFY(!clip.isEmpty());
+        Document *document = nullptr;
+        QQuickWindow *window = videoEditor(clip, document);
         QVERIFY(window);
-        document->setParent(window);
-        exporter->setParent(window);
         window->show();
         QVERIFY(QTest::qWaitForWindowExposed(window));
-        QCOMPARE(window->property("videoWidth").toInt(), 320);
+        auto *panel = window->findChild<QQuickItem *>(u"bottomPanel"_s);
+        auto *frameButton = window->findChild<QQuickItem *>(u"frameButton"_s);
+        QVERIFY(panel && frameButton);
+        QVERIFY(panel->isVisible());
+        // On the toolbar, or behind its more button when narrow.
+        QVERIFY(frameButton->property("available").toBool());
+        QVERIFY(document->annotationLocked(0));
+        QCOMPARE(document->hitTest(100, 100, 1), -1);
+
+        // Unlocked from its row in the layer list, whose rows are items
+        // of the list rather than its children.
+        const std::function<QQuickItem *(QQuickItem *)> lockIn = [&](QQuickItem *item) -> QQuickItem * {
+            if (item->objectName() == u"lockButton"_s)
+                return item;
+            for (QQuickItem *child : item->childItems()) {
+                if (QQuickItem *found = lockIn(child))
+                    return found;
+            }
+            return nullptr;
+        };
+        QQuickItem *lock = nullptr;
+        QTRY_VERIFY((lock = lockIn(window->contentItem())));
+        QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier,
+                          lock->mapToScene(QPointF(lock->width() / 2, lock->height() / 2)).toPoint());
+        QVERIFY(!document->annotationLocked(0));
+        QCOMPARE(document->hitTest(100, 100, 1), 0);
+
+        // A mark, and the frame taken out: a new editor with no video.
+        document->addText(20, 20, u"Still"_s, Qt::yellow, 20);
+        QTRY_VERIFY_WITH_TIMEOUT(document->clipImage(document->annotations().first()).pixelColor(10, 10)
+                                     != QColor(Qt::black), 5000);
+        const QList<QWindow *> before = QGuiApplication::topLevelWindows();
+        QVERIFY(QMetaObject::invokeMethod(window, "takeFrame"));
+        QQuickWindow *still = nullptr;
+        QTRY_VERIFY((still = [&]() -> QQuickWindow * {
+            for (QWindow *w : QGuiApplication::topLevelWindows()) {
+                if (!before.contains(w) && w->property("videoMode").isValid() && w->isVisible())
+                    return qobject_cast<QQuickWindow *>(w);
+            }
+            return nullptr;
+        }()));
+        auto *frame = still->property("document").value<Document *>();
+        QVERIFY(frame);
+        QVERIFY(!frame->hasVideo());
+        QVERIFY(!still->property("videoMode").toBool());
+        QCOMPARE(frame->annotationCount(), 2);
+        QCOMPARE(frame->annotationTool(0), int(Document::Image));
+        QCOMPARE(frame->annotationText(1), u"Still"_s);
+        QTest::qWait(100);
+        saveScreenshot(still, u"editor-frame"_s);
+        const QColor seen = frame->render(1).pixelColor(200, 200);
+        QVERIFY2(seen.blue() > 80 && seen.red() < 60, qPrintable(seen.name()));
+        still->setProperty("discardConfirmed", true);
+        still->close();
+
         window->setProperty("discardConfirmed", true);
         window->close();
         QTRY_VERIFY(!window->isVisible());
+        delete window;
+    }
+
+    // A video added to a screenshot: the editor turns to one for video.
+    void editorAddsVideo()
+    {
+        QTemporaryDir dir;
+        const QString clip = writeVideo(dir.path() + u"/clip.mp4"_s, 30, Qt::darkCyan);
+        QVERIFY(!clip.isEmpty());
+        auto *document = new Document;
+        document->setImage(demoScreen(320, 200));
+        document->liftBase(u"Screenshot"_s);
+        QQmlComponent component(m_engine);
+        component.loadFromModule("Guckste", "EditorWindow");
+        auto *window = qobject_cast<QQuickWindow *>(
+            component.createWithInitialProperties({{u"document"_s, QVariant::fromValue(document)}}));
+        QVERIFY2(window, qPrintable(component.errorString()));
+        document->setParent(window);
+        window->show();
+        QVERIFY(QTest::qWaitForWindowExposed(window));
+        auto *panel = window->findChild<QQuickItem *>(u"bottomPanel"_s);
+        auto *frameButton = window->findChild<QQuickItem *>(u"frameButton"_s);
+        auto *toolbar = window->findChild<QQuickItem *>(u"toolbar"_s);
+        QVERIFY(panel && frameButton && toolbar);
+        QVERIFY(!window->property("videoMode").toBool());
+        QVERIFY(!panel->isVisible());
+        QVERIFY(!frameButton->isVisible());
+        const auto units = [&] { return toolbar->property("units").toList().size(); };
+        const int imageUnits = units();
+        QCOMPARE(document->time(), -1);
+
+        QSignalSpy added(document, &Document::videoAdded);
+        document->addVideoFile(clip, true);
+        QTRY_COMPARE_WITH_TIMEOUT(added.count(), 1, 10000);
+        QTRY_VERIFY(window->property("videoMode").toBool());
+        QVERIFY(panel->isVisible());
+        QTRY_COMPARE(units(), imageUnits + 1);
+        QCOMPARE(document->annotations()[1].rect(), QRectF(320, 0, 320, 240));
+        QCOMPARE(document->time(), 0);
+        // The screenshot shows the whole time, beside the clip.
+        QVERIFY(document->isShown(0));
+        QTest::qWait(300);
+        saveScreenshot(window, u"editor-video"_s);
+
+        // Closing asks, about the video now.
+        window->close();
+        auto *dialog = window->findChild<QObject *>(u"discardDialog"_s);
+        QVERIFY(dialog);
+        QTRY_VERIFY(dialog->property("visible").toBool());
+        QCOMPARE(dialog->property("message").toString(), u"The changes to this video are not saved."_s);
+        QMetaObject::invokeMethod(dialog, "reject");
+        QTRY_VERIFY(!dialog->property("visible").toBool());
+
+        window->setProperty("discardConfirmed", true);
+        window->close();
+        QTRY_VERIFY(!window->isVisible());
+        delete window;
     }
 
 private:

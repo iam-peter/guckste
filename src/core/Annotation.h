@@ -7,12 +7,13 @@
 #include <QRectF>
 #include <QString>
 
-// One mark on the screenshot, or another image placed beside or over it.
-// Geometry and sizes are in image pixels, so marks zoom with the image as
-// if drawn into it; only Measure marks keep their size on screen.
+// One layer of a document: a mark, an image such as the screenshot, or a
+// video clip. Geometry and sizes are in image pixels, so marks zoom with
+// the image as if drawn into it; only Measure marks keep their size on
+// screen.
 struct Annotation
 {
-    enum class Type { Pen, Line, Arrow, Rectangle, Ellipse, Marker, Text, Pixelate, Counter, Measure, Image };
+    enum class Type { Pen, Line, Arrow, Rectangle, Ellipse, Marker, Text, Pixelate, Counter, Measure, Image, Video };
 
     Type type = Type::Pen;
     QList<QPointF> points;
@@ -22,12 +23,25 @@ struct Annotation
     qreal size = 3;
     QString text;
     int number = 0;
-    // An Image's pixels, drawn into the rectangle of its two points.
+    // An Image's pixels, drawn into the rectangle of its two points; for a
+    // Video, the frame to show until the player has one.
     QImage image;
-    // On a recording: shown from startMs until endMs, in the recording's
-    // own time; endMs -1 is to the end.
+    // What the layer list calls it, when not named after its kind.
+    QString name;
+    // Not picked, moved or removed on the canvas, like the screenshot an
+    // editor opens with until it is unlocked.
+    bool locked = false;
+    // When it shows, in the document's time in ms; endMs -1 is to the end.
+    // A Video always has an end.
     int startMs = 0;
     int endMs = -1;
+    // A Video plays `source` from `clipIn` ms on, at startMs; the source
+    // is `sourceMs` long. `clip` tells the clip's frames apart from other
+    // clips', and stays with it through undo.
+    QString source;
+    int clipIn = 0;
+    int sourceMs = 0;
+    int clip = 0;
     bool shownAt(qint64 ms) const { return ms < 0 || (ms >= startMs && (endMs < 0 || ms < endMs)); }
 
     // The normalized rectangle spanned by the first two points.
@@ -41,6 +55,8 @@ struct Annotation
     bool hasEndPoints() const;
     // A box to resize by its corners and edges, like a rectangle's.
     bool hasBox() const;
+    // Pixels in a rectangle: an image or a video clip.
+    bool isPicture() const { return type == Type::Image || type == Type::Video; }
 
     // The distance a Measure mark shows, in image pixels: exact along an
     // axis, rounded otherwise.

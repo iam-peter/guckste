@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Annotation.h"
+#include "VideoProbe.h"
 
 #include <QColor>
 #include <QImage>
@@ -9,9 +10,8 @@
 #include <QRectF>
 #include <QUrl>
 #include <QVariantList>
-#include <QPointer>
+#include <QHash>
 #include <QVideoFrame>
-#include <QVideoSink>
 #include <QtQml/qqmlregistration.h>
 
 #include <optional>
@@ -20,9 +20,12 @@
 // begin/update/commitAnnotation as the pointer moves; the image is shown
 // through the "guckste" image provider at `imageSource`.
 //
-// Further images can be added as Image annotations, to combine screenshots:
-// the screenshot stays at the origin as the bottom layer, and the canvas,
-// what is exported, grows to take in every image wherever it is placed.
+// In an editor everything is a layer: the screenshot is lifted into an
+// Image layer, locked until it is unlocked, further images are added
+// beside it, and video clips too, side by side or one after the other in
+// time. The canvas, what is exported, takes in every image and clip
+// wherever it is placed. With a clip in it the document has a duration,
+// and every layer a time it shows.
 class Document : public QObject
 {
     Q_OBJECT
@@ -48,18 +51,28 @@ class Document : public QObject
     // line marks up with, as {vertical, position} in image pixels. Not
     // part of the undo history, as in GIMP.
     Q_PROPERTY(QVariantList guides READ guides NOTIFY guidesChanged)
-    // The time of a recording the document is shown at, in ms, which
-    // leaves out the marks not shown then; -1, as for a screenshot, shows
-    // all of them. New marks start there.
+    // The time the document is shown at, in ms, which leaves out the
+    // layers not shown then; -1, as without video, shows all of them.
+    // New marks start there.
     Q_PROPERTY(int time READ time WRITE setTime NOTIFY timeChanged)
+    // How long the video is: to the end of the last clip, or of anything
+    // set to end later; 0 without clips.
+    Q_PROPERTY(int duration READ duration NOTIFY changed)
+    Q_PROPERTY(bool hasVideo READ hasVideo NOTIFY changed)
+    // The file name the document goes by: the image it was opened from,
+    // or the first clip's video.
+    Q_PROPERTY(QString name READ name NOTIFY changed)
     // Copies and saves draw the guides in, 1 px wide.
     Q_PROPERTY(bool exportGuides READ exportGuides WRITE setExportGuides NOTIFY exportGuidesChanged)
 
 public:
     // Mirrors Annotation::Type, with Select in front, for QML.
-    // Image is no tool to draw with, only the kind of an added image.
-    enum Tool { Select, Pen, Line, Arrow, Rectangle, Ellipse, Marker, Text, Pixelate, Counter, Measure, Image };
+    // Image and Video are no tools to draw with, only kinds of layers.
+    enum Tool { Select, Pen, Line, Arrow, Rectangle, Ellipse, Marker, Text, Pixelate, Counter, Measure, Image, Video };
     Q_ENUM(Tool)
+    // Where an added clip goes: as the one the document opens with, at
+    // the end of the clips in time, or right of the canvas from the start.
+    enum class Placement { Base, After, Beside };
 
     explicit Document(QObject *parent = nullptr);
     ~Document() override;
@@ -83,17 +96,45 @@ public:
     int revision() const { return m_revision; }
     int time() const { return m_time; }
     void setTime(int ms);
-    // On a recording: the frame on screen, which pixelated marks coarsen
-    // in place of the screenshot. Converted only when one needs it.
-    void setBackdropFrame(const QVideoFrame &frame);
-    // Takes each frame a video output shows as that frame.
-    Q_INVOKABLE void followVideo(QVideoSink *sink);
+    int duration() const;
+    static int durationOf(const QList<Annotation> &layers);
+    bool hasVideo() const;
+    QString name() const;
+    // The screenshot becomes the bottom layer, locked, called `name`; the
+    // editor does this before anything is drawn, so it is no undo step.
+    Q_INVOKABLE void liftBase(const QString &name);
+    // A locked layer is left alone on the canvas: clicks go through it
+    // and it cannot be moved, reshaped or removed.
+    Q_INVOKABLE bool annotationLocked(int index) const;
+    Q_INVOKABLE void setLocked(int index, bool locked);
+
+    // Video clips. The frames a player shows go to their clip, converted
+    // only when one is painted.
+    int addVideo(const VideoInfo &video, Placement placement);
+    // Reads the video first; videoAdded or videoFailed tells how it went.
+    Q_INVOKABLE void addVideoFile(const QString &path, bool after);
+    void setClipFrame(int clip, const QVideoFrame &frame);
+    void setClipImage(int clip, const QImage &image);
+    // What a clip shows now: its latest frame, or the one it was added with.
+    QImage clipImage(const Annotation &clip) const;
+    // A new document with what is shown now, every clip as an image of
+    // its frame and all of it shown all the time: a still to go on with.
+    Document *frameDocument() const;
+    // Replaces every layer, as for an exporter's copy; no undo step.
+    void setLayers(const QList<Annotation> &layers);
+    // Written out as a video: nothing left unsaved.
+    Q_INVOKABLE void markSaved();
+    // A clip's video moved, as a recording saved by moving it: the clips
+    // play it from where it is now, in the undo history too.
+    Q_INVOKABLE void relinkSource(const QString &from, const QString &to);
     // Whether a mark is shown at the document's time.
     Q_INVOKABLE bool isShown(int index) const;
     Q_INVOKABLE int annotationStart(int index) const;
     Q_INVOKABLE int annotationEnd(int index) const;
     // When a mark shows on a recording, as one undo step; end -1 is to the
     // end. Dragging: one undo step from beginRetime() to endRetime().
+    // A clip's length stays within its video: moving its start alone
+    // trims where it starts in the video too.
     Q_INVOKABLE void setAnnotationTiming(int index, int startMs, int endMs);
     Q_INVOKABLE void beginRetime(int index);
     Q_INVOKABLE void retime(int startMs, int endMs);
@@ -201,8 +242,10 @@ signals:
     void canvasChanged();
     void guidesChanged();
     void timeChanged();
-    // The frame under pixelated marks changed, and with it how they look.
-    void backdropChanged();
+    // A clip shown now has a new frame.
+    void framesChanged();
+    void videoAdded(int index);
+    void videoFailed(const QString &path);
     void exportGuidesChanged();
     void selectedIndexChanged();
     void filePathChanged();
@@ -213,8 +256,11 @@ private:
     void setModified(bool modified);
     void updateCanvas();
     void snapImage(int index);
+    // Sets a mark's time; a clip's from how it was before, `before`.
+    void applyTiming(int index, int startMs, int endMs);
 
     static int s_nextId;
+    static int s_nextClip;
     int m_id;
     int m_imageVersion = 0;
     QImage m_image;
@@ -240,11 +286,12 @@ private:
     QList<Guide> m_guides;
     bool m_exportGuides = false;
     int m_time = -1;
-    // What stands under the marks: the screenshot, or a recording's frame.
-    const QImage &baseImage() const;
-    QVideoFrame m_backdropFrame;
-    QPointer<QVideoSink> m_followed;
-    mutable QImage m_backdropImage;
-    mutable bool m_backdropStale = false;
+    struct ClipFrame
+    {
+        QVideoFrame frame;
+        QImage image;
+        bool stale = false;
+    };
+    mutable QHash<int, ClipFrame> m_clipFrames;
     int m_retiming = -1;
 };

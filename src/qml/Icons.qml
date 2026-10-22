@@ -24,6 +24,7 @@ QtObject {
         case Document.Counter: return "hash"
         case Document.Measure: return "ruler"
         case Document.Image: return "image"
+        case Document.Video: return "film"
         default: return "square"
         }
     }

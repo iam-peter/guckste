@@ -11,9 +11,10 @@ and copy or save it. On top of that it has an editor that enlarges a
 screenshot pixel for pixel, puts measurement marks on it that count the
 pixels, combines several screenshots into one picture with a layer panel
 and GIMP-style guides, and keeps every mark editable. The same picker
-starts a recording, which opens in a video editor to trim it and to draw
-on it, each mark showing for a time of its own, set on lanes under the
-timeline.
+starts a recording, which opens in the same editor: there it is trimmed
+and drawn on, each mark showing for a time of its own, set on lanes
+under the timeline; further videos go beside it or after it, and any
+frame can be taken out as an image.
 
 ![The editor combining a settings window and a terminal into one picture, with marks, a measurement, a guide and the layer panel](docs/screenshots/editor.png)
 
@@ -122,15 +123,25 @@ which asks for the Accessibility permission. Wayland has no way to
 listen, so the option is not offered there. Every key on the desktop is
 seen while that is on, so leave it off when typing a password.
 
-Stopping opens the recording in the video editor (the settings can send
-it straight to the screenshot folder instead). The same tools draw on
-the video, at the size they will have in the file. Space plays and
-pauses, `,` and `.` step a frame, `[` and `]` set the start and the end
-to keep, which the handles on the timeline do as well; click or drag the
-timeline to scrub.
+Stopping opens the recording in the editor (the settings can send it
+straight to the screenshot folder instead), as a clip on the canvas,
+locked like a screenshot until it is unlocked in the layer panel. With a
+video in it the editor has a timeline below the canvas. The same tools
+draw on the video, at the size they will have in the file. Space plays
+and pauses, `,` and `.` step a frame, `[` and `]` set the start and the
+end to keep, which the handles on the timeline do as well; click or drag
+the timeline to scrub.
 
-Each mark gets a lane under the timeline, as in a video editor: a bar
-for when it shows. A new mark starts at the playhead and lasts to the
+More videos come in from the add button or by dropping them on the
+window: "Video after the others" places one where the last clip is,
+starting when it ends, so they play one after the other; "Video beside"
+places one right of the canvas from the start, so they play side by
+side. Screenshots and images go in as before, shown the whole time. A
+clip moves and resizes on the canvas like an image.
+
+Every layer gets a lane under the timeline, as in a video editor: a bar
+for when it shows. A clip's bar is as long as its video at most:
+dragging its start trims the beginning of the video, its end the end. A new mark starts at the playhead and lasts to the
 end; drag the bar's edges to set when it comes and goes, or the bar to
 move it in time. Click a lane to select its mark (going to where it
 shows if it is not there at the playhead), double-click to go to its
@@ -141,12 +152,16 @@ the right-click actions go to all of them too. The lanes scroll, and the
 divider above the controls makes room for more of them. A pixelated
 area coarsens the frame on screen, as it will in the saved video.
 
-Save (Ctrl+S) writes the video to the screenshot folder with each mark
-on the frames of its time and the trimmed parts left out, re-encoding
-it; with no marks and no trim the recording is moved there as it is.
-Closing without saving deletes the recording.
-`guckste open talk.mp4`, or Open in either editor, opens an existing
-video the same way; that file is left alone and the result is a new one.
+Save (Ctrl+S) writes the video to the screenshot folder: every frame is
+the canvas at its time, each clip at its frame, the marks and images in
+their order, the clips' sound mixed, the trimmed parts left out. A
+recording saved as it is, one clip, untrimmed and unmarked, is moved
+there instead. Closing without saving deletes the recording. The camera
+button (Ctrl+Shift+F) opens the frame on screen in a new editor, each
+clip as an image of that frame and every mark still editable, to save as
+a picture; Copy copies the frame. `guckste open talk.mp4`, or Open in
+the editor, opens an existing video the same way; that file is left
+alone and the result is a new one.
 
 Recording goes through Qt Multimedia and the FFmpeg that comes with Qt, so
 nothing has to be installed. The format is the first of MP4/H.264,
@@ -192,6 +207,11 @@ on their corners and edges (Shift keeps them square, or snaps a line to
 45°). Double-click a text to retype it where it is. The color and size
 on the toolbar go to the selected mark. Delete removes it.
 
+The screenshot is the bottom layer, locked so clicks and drags go to the
+marks; the lock in its row of the layer panel unlocks it, to move,
+resize, raise or remove it like any other image. Any layer can be locked
+the same way.
+
 Further screenshots and images can be combined with the first one: the
 add button captures a region (the editor steps aside meanwhile, and Enter
 in the overlay adds the region), opens image files, or pastes the
@@ -210,9 +230,9 @@ status bar, what is drawn, moved or resized lines up with a guide once
 within a few pixels of it, edges and middles alike. "Export guides" draws
 them into copies and saved images, 1 px wide at any zoom.
 
-The layer panel on the right lists every mark and image, topmost first,
-above the screenshot: click one to select it, raise or lower it with the
-arrows, or remove it. Double-clicking a text there edits it too.
+The layer panel on the right lists every mark, image and clip, topmost
+first: click one to select it, lock or unlock it, raise or lower it with
+the arrows, or remove it. Double-clicking a text there edits it too.
 
 Copy and save export what is on screen: the canvas enlarged pixel for
 pixel at the current zoom, with the marks enlarged along. Untick "Export
@@ -232,7 +252,7 @@ exporting at 100 %, otherwise it asks for a name; Save as…
 - Whether a saved file's path goes to the clipboard, and the editor's
   pixel grid from 800 %.
 - Recording: the frame rate (15, 24, 30 or 60 fps), the quality, the
-  microphone, and whether a recording opens in the video editor or goes
+  microphone, and whether a recording opens in the editor or goes
   straight to the screenshot folder.
 - Launching at login, which writes `~/.config/autostart/guckste.desktop`
   on Linux.
@@ -281,9 +301,12 @@ build next to the Guckste in use, give it its own instance name:
   `WindowFinder` (the windows on screen, for picking one), `CursorCapture`
   and `KeyListener` with `KeyOverlay` (the pointer and the keys pressed,
   per platform), `ScreenRecorder` (QScreenCapture frames cropped to the
-  region and encoded by QMediaRecorder), `VideoExporter` (plays a
-  recording back into a recorder, each mark painted on the frames of its
-  time, trim applied), `Encoding` and `VideoFrames` (the format this Qt
+  region and encoded by QMediaRecorder), `Playback` (a clock for the
+  document's time, with a player per clip that follows it),
+  `VideoExporter` (decodes the clips as their time comes and puts every
+  frame together from them and the marks, mixing their sound, into a
+  recorder), `VideoProbe` (a video's size, length and first frame),
+  `Encoding` and `VideoFrames` (the format this Qt
   encodes, bit rates, frames as NV12), `SingleInstance` (one Guckste per
   user, by a lock file and a local socket), `Preferences` and
   `FileNaming`.
@@ -292,7 +315,7 @@ build next to the Guckste in use, give it its own instance name:
   image; `Ruler`, the editor's rulers; `App`, the tray icon and the
   windows; the image provider that shows documents to QML.
 - `src/qml` — `CaptureOverlay`, `EditorWindow` with its `LayerPanel`,
-  `VideoEditorWindow` with the `Timeline` and its `TimelineLanes`,
+  and with video the `Timeline` and its `TimelineLanes`,
   `SettingsWindow`, `RecordingControls`, the timer's `Countdown`, and what
   the windows share: the `AnnotationToolbar` with its `ColorPicker`, and
   the `DrawingArea` with the pointer handling of every tool, the handles,

@@ -55,6 +55,8 @@ bool Annotation::isEmpty() const
         return points.size() < 2 || rect().width() < 1 || rect().height() < 1;
     case Type::Image:
         return image.isNull() || points.size() < 2 || rect().width() < 1 || rect().height() < 1;
+    case Type::Video:
+        return source.isEmpty() || points.size() < 2 || rect().width() < 1 || rect().height() < 1;
     }
     return true;
 }
@@ -67,7 +69,7 @@ bool Annotation::hasEndPoints() const
 bool Annotation::hasBox() const
 {
     return type == Type::Rectangle || type == Type::Ellipse || type == Type::Marker || type == Type::Pixelate
-        || type == Type::Image;
+        || isPicture();
 }
 
 bool Annotation::isAxisAligned(const QPointF &a, const QPointF &b)

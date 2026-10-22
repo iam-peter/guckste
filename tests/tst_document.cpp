@@ -12,6 +12,8 @@
 #include <QTest>
 #include <QVideoFrame>
 
+#include <memory>
+
 using namespace Qt::StringLiterals;
 
 namespace {
@@ -455,26 +457,195 @@ private slots:
         QVERIFY(doc.isShown(0));
     }
 
-    // On a recording, pixelated marks coarsen the frame on screen, not
-    // the screenshot the document started with.
+    static VideoInfo video(const QString &path, QSize size, int ms, const QColor &color)
+    {
+        VideoInfo info;
+        info.path = path;
+        info.size = size;
+        info.durationMs = ms;
+        info.poster = QImage(size, QImage::Format_ARGB32_Premultiplied);
+        info.poster.fill(color);
+        return info;
+    }
+
+    // Over a clip, pixelated marks coarsen the frame shown, not the one
+    // it was added with.
     void pixelatesTheFrameShown()
     {
         Document doc;
-        QImage red(40, 40, QImage::Format_ARGB32_Premultiplied);
-        red.fill(Qt::red);
-        doc.setImage(red);
+        QCOMPARE(doc.addVideo(video(u"/v/a.mp4"_s, QSize(40, 40), 1000, Qt::red), Document::Placement::Base), 0);
+        doc.setTime(0);
         doc.beginAnnotation(Document::Pixelate, 0, 0, Qt::black, 4);
         doc.updateAnnotation(40, 40, false);
         doc.commitAnnotation();
         QCOMPARE(doc.render(1).pixelColor(20, 20), QColor(Qt::red));
 
-        QSignalSpy backdrop(&doc, &Document::backdropChanged);
+        QSignalSpy frames(&doc, &Document::framesChanged);
         QImage blue(40, 40, QImage::Format_RGB32);
         blue.fill(Qt::blue);
-        doc.setBackdropFrame(QVideoFrame(blue));
-        QCOMPARE(backdrop.count(), 1);
+        doc.setClipFrame(doc.annotations().first().clip, QVideoFrame(blue));
+        QCOMPARE(frames.count(), 1);
         const QColor shown = doc.render(1).pixelColor(20, 20);
         QVERIFY2(shown.blue() > 200 && shown.red() < 50, qPrintable(shown.name()));
+        // Not shown then: no repaint asked for.
+        doc.setTime(2000);
+        doc.setClipFrame(doc.annotations().first().clip, QVideoFrame(blue.copy()));
+        QCOMPARE(frames.count(), 1);
+    }
+
+    // The screenshot an editor opens with is a layer, locked until it is
+    // unlocked; then it moves and goes like any other.
+    // A mark just drawn is selected, so the toolbar restyles it at once.
+    void selectsWhatWasDrawn()
+    {
+        Document doc;
+        doc.setImage(checkerboard(60, 40));
+        doc.beginAnnotation(Document::Arrow, 5, 5, Qt::red, 3);
+        QCOMPARE(doc.selectedIndex(), -1);
+        doc.updateAnnotation(40, 30, false);
+        doc.commitAnnotation();
+        QCOMPARE(doc.selectedIndex(), 0);
+        // Nothing worth keeping: nothing selected.
+        doc.beginAnnotation(Document::Line, 5, 5, Qt::red, 3);
+        doc.commitAnnotation();
+        QCOMPARE(doc.annotationCount(), 1);
+        QCOMPARE(doc.selectedIndex(), -1);
+    }
+
+    void liftsAndUnlocksTheBase()
+    {
+        Document doc;
+        doc.setImage(checkerboard(60, 40));
+        doc.liftBase(u"Screenshot"_s);
+        QCOMPARE(doc.annotationCount(), 1);
+        QCOMPARE(doc.imageWidth(), 0);
+        QCOMPARE(doc.canvas(), QRect(0, 0, 60, 40));
+        QVERIFY(!doc.canUndo());
+        QVERIFY(!doc.modified());
+        QCOMPARE(doc.render(1).pixelColor(5, 5), checkerboard(60, 40).pixelColor(5, 5));
+
+        // Locked: clicks go through, it stays and stays put.
+        QVERIFY(doc.annotationLocked(0));
+        QCOMPARE(doc.hitTest(30, 20, 1), -1);
+        QVERIFY(doc.handlePoints(0).isEmpty());
+        doc.removeAnnotation(0);
+        QCOMPARE(doc.annotationCount(), 1);
+
+        doc.setLocked(0, false);
+        QCOMPARE(doc.hitTest(30, 20, 1), 0);
+        QCOMPARE(doc.handlePoints(0).size(), 8);
+        doc.beginMove(0);
+        doc.moveBy(10, 0);
+        doc.endMove();
+        QCOMPARE(doc.annotations().first().rect(), QRectF(10, 0, 60, 40));
+        QCOMPARE(doc.canvas(), QRect(10, 0, 60, 40));
+        doc.undo();
+        doc.undo();
+        QVERIFY(doc.annotationLocked(0));
+        doc.setLocked(0, false);
+        doc.removeAnnotation(0);
+        QCOMPARE(doc.annotationCount(), 0);
+        QVERIFY(doc.canvas().isEmpty());
+    }
+
+    // Clips one after the other in time, or side by side from the start;
+    // a clip's start trims into its video, its end no further than the
+    // video goes.
+    void placesAndTrimsClips()
+    {
+        Document doc;
+        QVERIFY(!doc.hasVideo());
+        QCOMPARE(doc.duration(), 0);
+        doc.addVideo(video(u"/v/a.mp4"_s, QSize(320, 240), 3000, Qt::red), Document::Placement::Base);
+        QVERIFY(!doc.canUndo());
+        QVERIFY(doc.annotationLocked(0));
+        QCOMPARE(doc.duration(), 3000);
+        QCOMPARE(doc.name(), u"a.mp4"_s);
+
+        const int after = doc.addVideo(video(u"/v/b.mp4"_s, QSize(320, 240), 2000, Qt::green), Document::Placement::After);
+        QCOMPARE(after, 1);
+        QCOMPARE(doc.annotationStart(1), 3000);
+        QCOMPARE(doc.annotationEnd(1), 5000);
+        QCOMPARE(doc.annotations()[1].rect(), QRectF(0, 0, 320, 240));
+        QCOMPARE(doc.duration(), 5000);
+        QCOMPARE(doc.canvas(), QRect(0, 0, 320, 240));
+
+        const int beside = doc.addVideo(video(u"/v/c.mp4"_s, QSize(160, 120), 1000, Qt::blue), Document::Placement::Beside);
+        QCOMPARE(doc.annotationStart(beside), 0);
+        QCOMPARE(doc.annotations()[beside].rect(), QRectF(320, 0, 160, 120));
+        QCOMPARE(doc.canvas(), QRect(0, 0, 480, 240));
+
+        // Its start later: the clip starts 500 ms into its video.
+        doc.setAnnotationTiming(1, 3500, 5000);
+        QCOMPARE(doc.annotations()[1].clipIn, 500);
+        // Its start earlier than the video allows: held at the video's start.
+        doc.setAnnotationTiming(1, 2000, 5000);
+        QCOMPARE(doc.annotationStart(1), 3000);
+        QCOMPARE(doc.annotations()[1].clipIn, 0);
+        // Its end past the video's: held at the video's end.
+        doc.setAnnotationTiming(1, 3000, 9000);
+        QCOMPARE(doc.annotationEnd(1), 5000);
+        doc.setAnnotationTiming(1, 3000, 4000);
+        QCOMPARE(doc.annotationEnd(1), 4000);
+        // Moved: where in its video it starts stays.
+        doc.setAnnotationTiming(1, 3500, 4500);
+        QCOMPARE(doc.annotations()[1].clipIn, 0);
+        QCOMPARE(doc.duration(), 4500);
+        // Dragged, as one undo step from where the drag began.
+        doc.beginRetime(1);
+        doc.retime(3700, 4500);
+        doc.retime(3800, 4500);
+        doc.endRetime();
+        QCOMPARE(doc.annotations()[1].clipIn, 300);
+        doc.undo();
+        QCOMPARE(doc.annotations()[1].clipIn, 0);
+
+        // A mark set to end after the clips makes the video longer; one
+        // to the end does not.
+        const int before = doc.duration();
+        doc.addText(1, 1, u"x"_s, Qt::white, 10);
+        QCOMPARE(doc.duration(), before);
+        doc.setAnnotationTiming(doc.annotationCount() - 1, 0, before + 2000);
+        QCOMPARE(doc.duration(), before + 2000);
+    }
+
+    // A frame taken out: what shows then, clips as images of their frame,
+    // shown all the time.
+    void takesAFrame()
+    {
+        Document doc;
+        doc.addVideo(video(u"/v/a.mp4"_s, QSize(40, 40), 2000, Qt::red), Document::Placement::Base);
+        doc.setTime(0);
+        doc.addText(5, 5, u"early"_s, Qt::white, 10);
+        doc.setTime(1500);
+        doc.addText(5, 5, u"late"_s, Qt::white, 10);
+        doc.setAnnotationTiming(1, 0, 1000);
+        QImage blue(40, 40, QImage::Format_RGB32);
+        blue.fill(Qt::blue);
+        doc.setClipFrame(doc.annotations().first().clip, QVideoFrame(blue));
+
+        std::unique_ptr<Document> still(doc.frameDocument());
+        QCOMPARE(still->annotationCount(), 2);
+        QCOMPARE(still->annotationTool(0), int(Document::Image));
+        QCOMPARE(LayerModel::label(still->annotations().first()), u"a.mp4 at 0:01.5"_s);
+        QCOMPARE(still->annotationText(1), u"late"_s);
+        QCOMPARE(still->annotationStart(1), 0);
+        QCOMPARE(still->annotationEnd(1), -1);
+        QVERIFY(!still->hasVideo());
+        QCOMPARE(still->render(1).pixelColor(30, 30), QColor(Qt::blue));
+    }
+
+    // A recording saved by moving it: its clips play it from there.
+    void relinksMovedVideos()
+    {
+        Document doc;
+        doc.addVideo(video(u"/tmp/rec.mp4"_s, QSize(40, 40), 1000, Qt::red), Document::Placement::Base);
+        doc.addText(1, 1, u"x"_s, Qt::white, 10);
+        doc.relinkSource(u"/tmp/rec.mp4"_s, u"/home/rec.mp4"_s);
+        QCOMPARE(doc.annotations().first().source, u"/home/rec.mp4"_s);
+        QCOMPARE(doc.name(), u"rec.mp4"_s);
+        doc.undo();
+        QCOMPARE(doc.annotations().first().source, u"/home/rec.mp4"_s);
     }
 
     void cropsWithAnnotations()

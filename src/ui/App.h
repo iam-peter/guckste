@@ -57,17 +57,19 @@ public:
     Q_INVOKABLE void toggleRecording();
     // The suffix of the video format this machine records.
     Q_INVOKABLE QString recordingSuffix() const;
-    // Writes `source` to `target` with the document's marks on every frame
-    // and the trim applied; the exporter reports progress and the result.
-    // `moveSource`: the source is a temporary recording that may be moved
-    // into place when nothing changes.
-    Q_INVOKABLE void exportRecording(VideoExporter *exporter, const QString &source, const QString &target,
-                                     Document *document, int startMs, int endMs, bool moveSource);
-    // The video editor on a recording, with `preview` as the frame to draw
-    // over until the player shows the video; a temporary recording is
-    // deleted unless it is saved.
-    void openVideoEditor(const QString &path, const QImage &preview, bool temporary);
-    static bool isVideoFile(const QString &path);
+    // Writes the document's clips, images and marks to `target` as a
+    // video, from startMs to endMs of its time (-1: to the end); the
+    // exporter reports progress and the result. `movable`: a temporary
+    // recording, moved into place when the video is that clip as it is.
+    Q_INVOKABLE void exportVideo(VideoExporter *exporter, const QString &target, Document *document, int startMs,
+                                 int endMs, const QString &movable);
+    // A new editor on what the document shows now, clips as images.
+    Q_INVOKABLE void openFrame(Document *document);
+    // The editor on a video, as a clip of its own; a temporary recording
+    // is deleted unless it is saved.
+    void openVideoEditor(const QString &path, bool temporary);
+    Q_INVOKABLE bool isVideoFile(const QString &path) const;
+    Q_INVOKABLE bool fileExists(const QString &path) const;
     Q_INVOKABLE void captureFull();
     Q_INVOKABLE void openImage();
     Q_INVOKABLE bool openEditor(const QString &path);
@@ -91,7 +93,7 @@ private slots:
 
 private:
     QQuickWindow *createWindow(const QString &type, const QVariantMap &properties);
-    void showEditor(Document *document);
+    QQuickWindow *showEditor(Document *document, const QVariantMap &properties = {});
     void openOverlay(bool recordMode, const QRect &presetRegion = QRect(), int minimumWait = 0);
     void updateTrayForRecording();
 

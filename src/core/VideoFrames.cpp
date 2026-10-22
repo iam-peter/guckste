@@ -2,6 +2,9 @@
 
 #include <QVideoFrameFormat>
 
+#include <optional>
+#include <utility>
+
 QVideoFrame VideoFrames::toNV12(const QImage &source)
 {
     const QImage image = source.convertToFormat(QImage::Format_RGB32);
@@ -44,6 +47,107 @@ QVideoFrame VideoFrames::toNV12(const QImage &source)
     return frame;
 }
 
+namespace {
+
+// How a YUV format lays out its planes.
+struct YuvLayout
+{
+    // Chroma halved across, and down.
+    bool halfWidth = true;
+    bool halfHeight = true;
+    // U and V interleaved in plane 1, V first when `swapped`.
+    bool interleaved = false;
+    bool swapped = false;
+    // Two bytes a sample; `shift` brings one down to eight bits.
+    bool wide = false;
+    int shift = 0;
+};
+
+std::optional<YuvLayout> layoutOf(QVideoFrameFormat::PixelFormat format)
+{
+    switch (format) {
+    case QVideoFrameFormat::Format_NV12: return YuvLayout{true, true, true, false, false, 0};
+    case QVideoFrameFormat::Format_NV21: return YuvLayout{true, true, true, true, false, 0};
+    case QVideoFrameFormat::Format_YUV420P: return YuvLayout{true, true, false, false, false, 0};
+    case QVideoFrameFormat::Format_YV12: return YuvLayout{true, true, false, true, false, 0};
+    case QVideoFrameFormat::Format_YUV422P: return YuvLayout{true, false, false, false, false, 0};
+    case QVideoFrameFormat::Format_P010:
+    case QVideoFrameFormat::Format_P016: return YuvLayout{true, true, true, false, true, 8};
+    case QVideoFrameFormat::Format_YUV420P10: return YuvLayout{true, true, false, false, true, 2};
+    default: return std::nullopt;
+    }
+}
+
+QImage yuvToImage(const QVideoFrame &frame, const YuvLayout &layout, const QRect &rect)
+{
+    const QVideoFrameFormat format = frame.surfaceFormat();
+    const bool full = format.colorRange() == QVideoFrameFormat::ColorRange_Full;
+    QVideoFrameFormat::ColorSpace space = format.colorSpace();
+    if (space == QVideoFrameFormat::ColorSpace_Undefined)
+        space = frame.height() >= 720 ? QVideoFrameFormat::ColorSpace_BT709 : QVideoFrameFormat::ColorSpace_BT601;
+    const bool bt709 = space != QVideoFrameFormat::ColorSpace_BT601;
+    // R = Y + rv·V, G = Y − gu·U − gv·V, B = Y + bu·U, in 1/65536,
+    // video range stretched to full.
+    const double yScale = full ? 1.0 : 255.0 / 219.0;
+    const double cScale = full ? 1.0 : 255.0 / 224.0;
+    const double kr = bt709 ? 0.2126 : 0.299, kb = bt709 ? 0.0722 : 0.114, kg = 1 - kr - kb;
+    const int ys = qRound(yScale * 65536);
+    const int rv = qRound(2 * (1 - kr) * cScale * 65536);
+    const int bu = qRound(2 * (1 - kb) * cScale * 65536);
+    const int gu = qRound(2 * (1 - kb) * kb / kg * cScale * 65536);
+    const int gv = qRound(2 * (1 - kr) * kr / kg * cScale * 65536);
+    const int yOffset = full ? 0 : 16;
+
+    const QRect area = rect & QRect(0, 0, frame.width(), frame.height());
+    QImage image(area.size(), QImage::Format_RGB32);
+    if (image.isNull())
+        return image;
+    const uchar *yPlane = frame.bits(0);
+    const uchar *uPlane = frame.bits(1);
+    const uchar *vPlane = layout.interleaved ? frame.bits(1) : frame.bits(2);
+    // YV12 has V before U; the interleaved ones say so per sample below.
+    if (layout.swapped && !layout.interleaved)
+        std::swap(uPlane, vPlane);
+    const int yStride = frame.bytesPerLine(0);
+    const int cStride = frame.bytesPerLine(1);
+    const auto sample = [&](const uchar *row, int x) -> int {
+        if (!layout.wide)
+            return row[x];
+        return reinterpret_cast<const quint16 *>(row)[x] >> layout.shift;
+    };
+    for (int y = 0; y < area.height(); ++y) {
+        const int sy = area.y() + y;
+        const int cy = layout.halfHeight ? sy / 2 : sy;
+        const uchar *yRow = yPlane + qsizetype(sy) * yStride;
+        const uchar *uRow = uPlane + qsizetype(cy) * cStride;
+        const uchar *vRow = vPlane + qsizetype(cy) * cStride;
+        auto *out = reinterpret_cast<QRgb *>(image.scanLine(y));
+        for (int x = 0; x < area.width(); ++x) {
+            const int sx = area.x() + x;
+            const int cx = layout.halfWidth ? sx / 2 : sx;
+            const int luma = (sample(yRow, sx) - yOffset) * ys;
+            int u, v;
+            if (layout.interleaved) {
+                // U then V, side by side; for the swapped ones V first.
+                const int first = sample(uRow, cx * 2);
+                const int second = sample(uRow, cx * 2 + 1);
+                u = (layout.swapped ? second : first) - 128;
+                v = (layout.swapped ? first : second) - 128;
+            } else {
+                u = sample(uRow, cx) - 128;
+                v = sample(vRow, cx) - 128;
+            }
+            const int r = (luma + rv * v + 32768) >> 16;
+            const int g = (luma - gu * u - gv * v + 32768) >> 16;
+            const int b = (luma + bu * u + 32768) >> 16;
+            out[x] = qRgb(qBound(0, r, 255), qBound(0, g, 255), qBound(0, b, 255));
+        }
+    }
+    return image;
+}
+
+} // namespace
+
 QImage VideoFrames::toImage(const QVideoFrame &source, const QRect &rect)
 {
     QVideoFrame frame = source;
@@ -55,6 +159,12 @@ QImage VideoFrames::toImage(const QVideoFrame &source, const QRect &rect)
         const QImage image = whole.copy(rect.isNull() ? whole.rect() : rect & whole.rect());
         frame.unmap();
         return image;
+    }
+    if (const auto layout = layoutOf(frame.pixelFormat()); layout && frame.map(QVideoFrame::ReadOnly)) {
+        const QImage image = yuvToImage(frame, *layout, rect.isNull() ? QRect(0, 0, frame.width(), frame.height()) : rect);
+        frame.unmap();
+        if (!image.isNull())
+            return image;
     }
     const QImage image = frame.toImage();
     return rect.isNull() ? image : image.copy(rect);

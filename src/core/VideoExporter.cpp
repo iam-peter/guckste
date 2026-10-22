@@ -1,40 +1,61 @@
 #include "VideoExporter.h"
 
-#include "AnnotationPainter.h"
 #include "Encoding.h"
 #include "VideoFrames.h"
 
+#include <QAudioBufferOutput>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QLoggingCategory>
 #include <QMediaMetaData>
+#include <QMediaPlayer>
 #include <QPainter>
 #include <QTimer>
 #include <QUrl>
-#include <QLoggingCategory>
+#include <QVideoSink>
 
 Q_LOGGING_CATEGORY(lcExport, "guckste.export")
+
+namespace {
+
+// How long before its time a clip starts decoding, so its first frame is
+// there when it is needed.
+constexpr qint64 leadUs = 500'000;
+// Frames a clip may decode ahead before its player is paused.
+constexpr int maxAhead = 30;
+constexpr int sampleRate = 48000;
+constexpr int channels = 2;
+
+qint64 framesAt(qint64 us)
+{
+    return us * sampleRate / 1'000'000;
+}
+
+// A sample of any format as a float, for the mix.
+float sampleAt(const QAudioBuffer &buffer, qsizetype frame, int channel)
+{
+    const QAudioFormat format = buffer.format();
+    const int count = format.channelCount();
+    const qsizetype at = frame * count + qMin(channel, count - 1);
+    switch (format.sampleFormat()) {
+    case QAudioFormat::Float: return buffer.constData<float>()[at];
+    case QAudioFormat::Int16: return buffer.constData<qint16>()[at] / 32768.0f;
+    case QAudioFormat::Int32: return buffer.constData<qint32>()[at] / 2147483648.0f;
+    case QAudioFormat::UInt8: return (buffer.constData<quint8>()[at] - 128) / 128.0f;
+    default: return 0;
+    }
+}
+
+} // namespace
 
 VideoExporter::VideoExporter(QObject *parent)
     : QObject(parent)
 {
-    m_player.setVideoSink(&m_sink);
-    m_player.setAudioBufferOutput(&m_audioOut);
-    connect(&m_sink, &QVideoSink::videoFrameChanged, this, &VideoExporter::onFrame);
-    connect(&m_audioOut, &QAudioBufferOutput::audioBufferReceived, this, &VideoExporter::onAudio);
-    connect(&m_player, &QMediaPlayer::mediaStatusChanged, this, [this](QMediaPlayer::MediaStatus status) {
-        qCDebug(lcExport) << "player status" << status << "running" << m_running << "encoding" << m_encoding;
-        if (!m_running)
-            return;
-        if (status == QMediaPlayer::LoadedMedia && !m_encoding)
-            onLoaded();
-        else if (status == QMediaPlayer::EndOfMedia && m_encoding)
-            finishEncoding();
-        else if (status == QMediaPlayer::InvalidMedia)
-            fail(tr("The recording cannot be read"));
-    });
-    connect(&m_player, &QMediaPlayer::errorOccurred, this,
-            [this](QMediaPlayer::Error, const QString &message) { fail(message); });
+    m_audioFormat.setSampleFormat(QAudioFormat::Float);
+    m_audioFormat.setSampleRate(sampleRate);
+    m_audioFormat.setChannelCount(channels);
+    m_audioFormat.setChannelConfig(QAudioFormat::ChannelConfigStereo);
 
     m_session.setVideoFrameInput(&m_videoIn);
     m_session.setRecorder(&m_recorder);
@@ -58,8 +79,14 @@ VideoExporter::VideoExporter(QObject *parent)
         }
         setProgress(1);
         setRunning(false);
+        QTimer::singleShot(0, this, [this] { stopDecoders(); });
         emit finished(path);
     });
+}
+
+VideoExporter::~VideoExporter()
+{
+    stopDecoders();
 }
 
 void VideoExporter::setRunning(bool running)
@@ -79,124 +106,306 @@ void VideoExporter::setProgress(qreal progress)
     emit progressChanged();
 }
 
+bool VideoExporter::copyAsItIs()
+{
+    if (m_job.layers.size() != 1)
+        return false;
+    const Annotation &clip = m_job.layers.first();
+    // Untrimmed, at its own size, at the start.
+    if (clip.type != Annotation::Type::Video || clip.clipIn > 0 || clip.startMs > 0 || clip.endMs < clip.sourceMs
+        || clip.image.isNull() || clip.rect() != QRectF(QPointF(0, 0), QSizeF(clip.image.size()))
+        || m_job.canvas != clip.rect().toAlignedRect() || m_job.startMs > 0
+        || (m_job.endMs >= 0 && m_job.endMs < clip.endMs))
+        return false;
+    const QString &source = clip.source;
+    if (QFileInfo(source) == QFileInfo(m_job.target)) {
+        setProgress(1);
+        emit finished(m_job.target);
+        return true;
+    }
+    QFile::remove(m_job.target);
+    if (!(m_job.moveSource && QFile::rename(source, m_job.target)) && !QFile::copy(source, m_job.target)) {
+        emit failed(tr("Could not write %1").arg(m_job.target));
+        return true;
+    }
+    setProgress(1);
+    emit finished(m_job.target);
+    return true;
+}
+
 bool VideoExporter::start(const Job &job)
 {
     if (m_running)
         return false;
     m_job = job;
     m_cancelled = false;
+    m_stopping = false;
     m_frames = 0;
     m_pendingVideo.clear();
     m_pendingAudio.clear();
+    m_mix.clear();
+    m_audioSent = 0;
+    stopDecoders();
     setProgress(0);
     QDir().mkpath(QFileInfo(job.target).absolutePath());
 
-    if (job.annotations.isEmpty() && job.startMs <= 0 && job.endMs < 0) {
-        // Nothing to change: the file as it is.
-        if (QFileInfo(job.source) == QFileInfo(job.target)) {
-            setProgress(1);
-            emit finished(job.target);
-            return true;
-        }
-        QFile::remove(job.target);
-        if (!(job.moveSource && QFile::rename(job.source, job.target)) && !QFile::copy(job.source, job.target)) {
-            emit failed(tr("Could not write %1").arg(job.target));
-            return false;
-        }
-        setProgress(1);
-        emit finished(job.target);
+    if (copyAsItIs())
         return true;
+
+    const qint64 durationMs = Document::durationOf(job.layers);
+    const qint64 endMs = job.endMs < 0 ? durationMs : qMin(job.endMs, durationMs);
+    m_startUs = qMax<qint64>(0, job.startMs) * 1000;
+    m_lengthUs = endMs * 1000 - m_startUs;
+    m_size = QSize(job.canvas.width() & ~1, job.canvas.height() & ~1);
+    if (m_lengthUs <= 0 || m_size.isEmpty()) {
+        emit failed(tr("Nothing left after trimming"));
+        return false;
     }
+    m_canvas.setLayers(job.layers);
 
     setRunning(true);
-    m_startUs = qMax<qint64>(0, job.startMs) * 1000;
-    m_endUs = job.endMs < 0 ? -1 : job.endMs * 1000;
-    m_player.setSource(QUrl::fromLocalFile(job.source));
+    for (const Annotation &a : std::as_const(job.layers)) {
+        // Clips outside the part written are left out.
+        if (a.type != Annotation::Type::Video || a.endMs * 1000 <= m_startUs || a.startMs * 1000 >= endMs * 1000)
+            continue;
+        auto decoder = std::make_unique<Decoder>();
+        Decoder *d = decoder.get();
+        d->clip = a;
+        d->player = new QMediaPlayer(this);
+        d->sink = new QVideoSink(d->player);
+        d->audio = new QAudioBufferOutput(m_audioFormat, d->player);
+        d->player->setVideoSink(d->sink);
+        d->player->setAudioBufferOutput(d->audio);
+        connect(d->sink, &QVideoSink::videoFrameChanged, this,
+                [this, d](const QVideoFrame &frame) { onFrame(d, frame); });
+        connect(d->audio, &QAudioBufferOutput::audioBufferReceived, this,
+                [this, d](const QAudioBuffer &buffer) { onAudio(d, buffer); });
+        connect(d->player, &QMediaPlayer::mediaStatusChanged, this, [this, d](QMediaPlayer::MediaStatus status) {
+            qCDebug(lcExport) << "clip" << d->clip.clip << "status" << status;
+            if (!m_running)
+                return;
+            if (status == QMediaPlayer::LoadedMedia && !d->loaded)
+                onLoaded(d);
+            else if (status == QMediaPlayer::EndOfMedia && d->started) {
+                d->ended = true;
+                schedulePump();
+            } else if (status == QMediaPlayer::InvalidMedia)
+                fail(tr("%1 cannot be read").arg(QFileInfo(d->clip.source).fileName()));
+        });
+        connect(d->player, &QMediaPlayer::errorOccurred, this,
+                [this](QMediaPlayer::Error, const QString &message) { fail(message); });
+        m_decoders.push_back(std::move(decoder));
+    }
+    // Loaded one by one, so a file that cannot be read fails it at once.
+    for (const auto &d : m_decoders)
+        d->player->setSource(QUrl::fromLocalFile(d->clip.source));
+    if (m_decoders.empty())
+        beginEncoding();
     return true;
 }
 
-void VideoExporter::onLoaded()
+void VideoExporter::onLoaded(Decoder *decoder)
 {
-    // The duration may not be known yet; then the end of the file is the end.
-    m_durationUs = m_player.duration() > 0 ? m_player.duration() * 1000 : -1;
-    if (m_durationUs > 0 && m_endUs > m_durationUs)
-        m_endUs = m_durationUs;
-    if (m_endUs >= 0 && m_endUs <= m_startUs) {
-        fail(tr("Nothing left after trimming"));
-        return;
+    decoder->loaded = true;
+    decoder->hasAudio = decoder->player->hasAudio();
+    decoder->frameRate = decoder->player->metaData().value(QMediaMetaData::VideoFrameRate).toDouble();
+    for (const auto &d : m_decoders) {
+        if (!d->loaded)
+            return;
     }
-    const QMediaMetaData meta = m_player.metaData();
-    QSize size = meta.value(QMediaMetaData::Resolution).toSize();
-    if (size.isEmpty())
-        size = QSize(1280, 720);
-    double fps = meta.value(QMediaMetaData::VideoFrameRate).toDouble();
-    if (fps <= 0)
-        fps = 30;
+    beginEncoding();
+}
+
+void VideoExporter::beginEncoding()
+{
+    m_frameRate = 0;
+    m_hasAudio = false;
+    for (const auto &d : m_decoders) {
+        m_frameRate = qMax(m_frameRate, d->frameRate);
+        m_hasAudio = m_hasAudio || d->hasAudio;
+    }
+    if (m_frameRate <= 0 || m_frameRate > 120)
+        m_frameRate = 30;
 
     QMediaFormat format = Encoding::bestFormat();
     // An audio input without audio would have the muxer wait for it forever.
-    m_session.setAudioBufferInput(m_player.hasAudio() ? &m_audioIn : nullptr);
-    if (!m_player.hasAudio())
+    m_session.setAudioBufferInput(m_hasAudio ? &m_audioIn : nullptr);
+    if (!m_hasAudio)
         format.setAudioCodec(QMediaFormat::AudioCodec::Unspecified);
     m_recorder.setMediaFormat(format);
-    m_recorder.setVideoFrameRate(fps);
-    m_recorder.setVideoResolution(QSize(size.width() & ~1, size.height() & ~1));
-    Encoding::apply(m_recorder, size, fps, m_job.quality);
+    m_recorder.setVideoFrameRate(m_frameRate);
+    m_recorder.setVideoResolution(m_size);
+    Encoding::apply(m_recorder, m_size, m_frameRate, m_job.quality);
     m_recorder.setOutputLocation(QUrl::fromLocalFile(m_job.target));
     m_encoding = true;
     m_recorder.record();
     if (!m_running)
         return;
-    // Audio at any other speed would come out stretched.
-    m_player.setPlaybackRate(m_player.hasAudio() ? 1.0 : 2.0);
-    if (m_startUs > 0)
-        m_player.setPosition(m_startUs / 1000);
-    m_player.play();
+    // Sound at any other speed would come out stretched; without, the
+    // clips decode faster than they play.
+    for (const auto &d : m_decoders)
+        d->player->setPlaybackRate(m_hasAudio ? 1.0 : 2.0);
+    schedulePump();
 }
 
-void VideoExporter::onFrame(const QVideoFrame &frame)
+void VideoExporter::onFrame(Decoder *decoder, const QVideoFrame &frame)
 {
-    if (!m_encoding || m_stopping || !frame.isValid())
+    if (!m_encoding || m_stopping || !frame.isValid() || decoder->ended)
         return;
-    const qint64 at = frame.startTime();
-    qCDebug(lcExport) << "frame at" << at << "pending" << m_pendingVideo.size();
-    if (at < m_startUs)
-        return;
-    if (m_endUs >= 0 && at > m_endUs) {
-        finishEncoding();
-        return;
+    decoder->frames.append(frame);
+    if (decoder->frames.size() > maxAhead && !decoder->held) {
+        decoder->held = true;
+        decoder->player->pause();
     }
-    QImage image = VideoFrames::toImage(frame).convertToFormat(QImage::Format_RGB32);
-    if (!m_job.annotations.isEmpty()) {
-        // Each mark on the frames of its time, in the source's time.
-        QPainter painter(&image);
-        AnnotationPainter marks(painter, image, 1);
-        const qint64 atMs = at / 1000;
-        for (const Annotation &a : std::as_const(m_job.annotations)) {
-            if (a.shownAt(atMs))
-                marks.paint(a);
+    schedulePump();
+}
+
+void VideoExporter::schedulePump()
+{
+    if (m_pumpScheduled)
+        return;
+    m_pumpScheduled = true;
+    QMetaObject::invokeMethod(this, [this] {
+        m_pumpScheduled = false;
+        pump();
+    }, Qt::QueuedConnection);
+}
+
+bool VideoExporter::hasFrame(Decoder *d, qint64 sourceUs)
+{
+    // The newest frame that starts by then; older ones are done with.
+    while (d->frames.size() >= 2 && d->frames[1].startTime() <= sourceUs)
+        d->frames.removeFirst();
+    if (d->frames.isEmpty())
+        return d->ended;
+    const QVideoFrame &first = d->frames.first();
+    // Known to be the one when a later frame came, or it lasts past then.
+    return d->ended || d->frames.size() >= 2 || first.startTime() >= sourceUs
+        || (first.endTime() > first.startTime() && first.endTime() > sourceUs);
+}
+
+void VideoExporter::startDecoder(Decoder *d, qint64 atUs)
+{
+    d->started = true;
+    const qint64 from = qMax(atUs, d->clip.startMs * 1000) - d->clip.startMs * 1000 + d->clip.clipIn * 1000;
+    d->player->setPosition(from / 1000);
+    d->player->play();
+}
+
+void VideoExporter::stopDecoder(Decoder *d)
+{
+    d->ended = true;
+    d->frames.clear();
+    d->player->stop();
+}
+
+void VideoExporter::pump()
+{
+    if (!m_encoding || m_stopping)
+        return;
+    while (m_pendingVideo.size() < 3) {
+        const qint64 outUs = qint64(m_frames * 1e6 / m_frameRate);
+        if (outUs >= m_lengthUs) {
+            finishEncoding();
+            return;
         }
+        const qint64 atUs = m_startUs + outUs;
+        bool ready = true;
+        for (const auto &d : m_decoders) {
+            const qint64 startUs = d->clip.startMs * 1000;
+            const qint64 endUs = d->clip.endMs * 1000;
+            if (!d->started && atUs >= startUs - leadUs && atUs < endUs)
+                startDecoder(d.get(), atUs);
+            if (d->started && !d->ended && atUs >= endUs)
+                stopDecoder(d.get());
+            if (atUs < startUs || atUs >= endUs)
+                continue;
+            const bool has = hasFrame(d.get(), atUs - startUs + d->clip.clipIn * 1000);
+            if (has && !d->frames.isEmpty())
+                m_canvas.setClipFrame(d->clip.clip, d->frames.first());
+            ready = ready && has;
+            // Waited for, or running low: on with decoding.
+            if (d->held && (!has || d->frames.size() < maxAhead / 3)) {
+                d->held = false;
+                d->player->play();
+            }
+        }
+        if (!ready)
+            return;
+
+        QImage image(m_size, QImage::Format_RGB32);
+        image.fill(Qt::black);
+        {
+            QPainter painter(&image);
+            m_canvas.setTime(int(atUs / 1000));
+            m_canvas.paintLayers(painter, 1, m_job.canvas.topLeft());
+        }
+        QVideoFrame out = VideoFrames::toNV12(image);
+        out.setStartTime(outUs);
+        out.setEndTime(qint64((m_frames + 1) * 1e6 / m_frameRate));
+        m_pendingVideo.append(out);
+        ++m_frames;
+        setProgress(qreal(outUs) / qreal(m_lengthUs));
+        mixUpTo(outUs);
+        flushVideo();
     }
-    QVideoFrame out = VideoFrames::toNV12(image);
-    out.setStartTime(at - m_startUs);
-    out.setEndTime(frame.endTime() >= 0 ? frame.endTime() - m_startUs : -1);
-    m_pendingVideo.append(out);
-    flushVideo();
-    ++m_frames;
-    const qint64 endUs = m_endUs >= 0 ? m_endUs : m_player.duration() * 1000;
-    if (endUs > m_startUs)
-        setProgress(qreal(at - m_startUs) / qreal(endUs - m_startUs));
 }
 
-void VideoExporter::onAudio(const QAudioBuffer &buffer)
+void VideoExporter::onAudio(Decoder *d, const QAudioBuffer &buffer)
 {
-    if (!m_encoding || m_stopping || !buffer.isValid())
+    if (!m_encoding || m_stopping || !buffer.isValid() || d->ended || !m_hasAudio)
         return;
-    const qint64 at = buffer.startTime();
-    if (at < m_startUs || (m_endUs >= 0 && at > m_endUs))
+    const QAudioFormat format = buffer.format();
+    if (format.sampleRate() != sampleRate || format.channelCount() <= 0) {
+        qCDebug(lcExport) << "sound at" << format.sampleRate() << "Hz left out";
         return;
-    m_pendingAudio.append(QAudioBuffer(QByteArray(buffer.constData<char>(), buffer.byteCount()), buffer.format(),
-                                       at - m_startUs));
+    }
+    // From the clip's time to the output's.
+    const qint64 offsetUs = d->clip.startMs * 1000 - d->clip.clipIn * 1000 - m_startUs;
+    const qint64 firstUs = buffer.startTime() + offsetUs;
+    const qint64 first = framesAt(firstUs);
+    const qint64 clipFrom = framesAt(qMax<qint64>(0, d->clip.startMs * 1000 - m_startUs));
+    const qint64 clipTo = qMin(framesAt(d->clip.endMs * 1000 - m_startUs), framesAt(m_lengthUs));
+    const qsizetype count = buffer.frameCount();
+    for (qsizetype i = 0; i < count; ++i) {
+        const qint64 at = first + i;
+        if (at < clipFrom || at < m_audioSent || at >= clipTo)
+            continue;
+        const qsizetype index = (at - m_audioSent) * channels;
+        if (m_mix.size() < index + channels)
+            m_mix.resize(index + channels, 0.0f);
+        for (int c = 0; c < channels; ++c)
+            m_mix[index + c] += sampleAt(buffer, i, c);
+    }
+    d->audioUs = qMax(d->audioUs, firstUs + buffer.duration());
+    mixUpTo(qint64(m_frames * 1e6 / m_frameRate));
+}
+
+void VideoExporter::mixUpTo(qint64 untilUs)
+{
+    if (!m_hasAudio)
+        return;
+    // Not past a clip whose sound is still to come.
+    qint64 limitUs = qMin(untilUs, m_lengthUs);
+    for (const auto &d : m_decoders) {
+        if (!d->hasAudio || d->ended)
+            continue;
+        const qint64 fromUs = d->clip.startMs * 1000 - m_startUs;
+        limitUs = qMin(limitUs, d->started ? qMax(d->audioUs, fromUs) : qMax<qint64>(0, fromUs));
+    }
+    const qint64 limit = framesAt(limitUs);
+    while (m_audioSent < limit) {
+        // A tenth of a second at a time.
+        const qint64 frames = qMin<qint64>(limit - m_audioSent, sampleRate / 10);
+        QByteArray data(frames * channels * qsizetype(sizeof(float)), Qt::Uninitialized);
+        auto *out = reinterpret_cast<float *>(data.data());
+        const qsizetype have = qMin<qsizetype>(m_mix.size(), frames * channels);
+        for (qsizetype i = 0; i < frames * channels; ++i)
+            out[i] = i < have ? qBound(-1.0f, m_mix[i], 1.0f) : 0.0f;
+        m_mix.remove(0, have);
+        m_pendingAudio.append(QAudioBuffer(data, m_audioFormat, m_audioSent * 1'000'000 / sampleRate));
+        m_audioSent += frames;
+    }
     flushAudio();
 }
 
@@ -209,6 +418,8 @@ void VideoExporter::flushVideo()
     }
     if (m_stopping)
         stopWhenFlushed();
+    else
+        schedulePump();
 }
 
 void VideoExporter::flushAudio()
@@ -238,12 +449,18 @@ void VideoExporter::finishEncoding()
     qCDebug(lcExport) << "finish: encoding" << m_encoding << "stopping" << m_stopping << "frames" << m_frames;
     if (!m_encoding || m_stopping)
         return;
-    m_stopping = true;
-    m_player.stop();
+    for (const auto &d : m_decoders) {
+        if (!d->ended)
+            stopDecoder(d.get());
+    }
     if (m_cancelled) {
         m_pendingVideo.clear();
         m_pendingAudio.clear();
+    } else {
+        // The sound to the end, silence where no clip has any.
+        mixUpTo(m_lengthUs);
     }
+    m_stopping = true;
     stopWhenFlushed();
 }
 
@@ -258,16 +475,29 @@ void VideoExporter::cancel()
         fail(tr("Cancelled"));
 }
 
+void VideoExporter::stopDecoders()
+{
+    for (const auto &d : m_decoders) {
+        d->player->disconnect(this);
+        d->sink->disconnect(this);
+        d->audio->disconnect(this);
+        d->player->stop();
+        d->player->deleteLater();
+    }
+    m_decoders.clear();
+}
+
 void VideoExporter::fail(const QString &message)
 {
     if (!m_running)
         return;
-    m_player.stop();
     const bool recording = m_recorder.recorderState() != QMediaRecorder::StoppedState;
     m_stopping = false;
     m_encoding = false;
     m_pendingVideo.clear();
     m_pendingAudio.clear();
+    // Not from within a player's own signal.
+    QTimer::singleShot(0, this, [this] { stopDecoders(); });
     if (recording)
         m_recorder.stop();
     QFile::remove(m_job.target);

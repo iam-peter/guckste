@@ -16,7 +16,9 @@ qt_add_qml_module(guckste_core
         core/ScreenRecorder.h core/ScreenRecorder.cpp
         core/Encoding.h core/Encoding.cpp
         core/VideoFrames.h core/VideoFrames.cpp
+        core/VideoProbe.h core/VideoProbe.cpp
         core/VideoExporter.h core/VideoExporter.cpp
+        core/Playback.h core/Playback.cpp
         core/CursorCapture.h core/CursorCapture.cpp
         core/KeyListener.h core/KeyListener.cpp
         core/KeyOverlay.h core/KeyOverlay.cpp
@@ -93,7 +95,6 @@ qt_add_qml_module(guckste_qml
         qml/RecordingControls.qml
         qml/ColorPicker.qml
         qml/Countdown.qml
-        qml/VideoEditorWindow.qml
         qml/DrawingArea.qml
         qml/LayerPanel.qml
         qml/Timeline.qml
@@ -112,6 +113,8 @@ qt_add_qml_module(guckste_qml
         icons/chevron-down.svg
         icons/trash-2.svg
         icons/lock.svg
+        icons/lock-open.svg
+        icons/camera.svg
         icons/clipboard-paste.svg
         icons/chevrons-right.svg
         icons/circle.svg

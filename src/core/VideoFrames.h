@@ -12,6 +12,9 @@ namespace VideoFrames {
 // An image as an NV12 frame, BT.601 video range, even sizes.
 QVideoFrame toNV12(const QImage &image);
 // The frame's pixels as an image, the region only when `rect` is given.
+// YUV frames are converted here, on the CPU: QVideoFrame::toImage() does
+// it on the GPU, in an OpenGL context of its own on the calling thread,
+// which can garble what Qt Quick draws.
 QImage toImage(const QVideoFrame &frame, const QRect &rect = QRect());
 // The frame cut down to `rect` (device pixels) as NV12, times kept.
 QVideoFrame cropped(const QVideoFrame &frame, const QRect &rect);

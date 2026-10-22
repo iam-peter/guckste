@@ -6,10 +6,10 @@
 #include <QPointer>
 #include <QtQml/qqmlregistration.h>
 
-// A document's layers for a list, topmost first: every mark and added
-// image, then the screenshot at the bottom. Rows only reset when layers
-// come, go or change places, so a list keeps its state while a mark is
-// dragged or restyled.
+// A document's layers for a list, topmost first: every mark, image and
+// clip, then the screenshot at the bottom while it is not a layer itself.
+// Rows only reset when layers come, go or change places, so a list keeps
+// its state while a mark is dragged or restyled.
 class LayerModel : public QAbstractListModel
 {
     Q_OBJECT
@@ -30,6 +30,7 @@ public:
         // When it shows on a recording, in ms; end -1 is to the end.
         StartRole,
         EndRole,
+        LockedRole,
     };
 
     explicit LayerModel(QObject *parent = nullptr);
@@ -45,6 +46,7 @@ public:
 
     // What a layer is called in the list.
     static QString label(const Annotation &annotation);
+    static QColor layerColor(const Annotation &annotation);
 
 signals:
     void documentChanged();
@@ -52,6 +54,8 @@ signals:
 
 private:
     void refresh();
+    void remember();
+    bool hasBase() const;
     // The kinds of the layers bottom to top: what decides a reset.
     QList<int> kinds() const;
 
@@ -60,5 +64,6 @@ private:
     QList<QString> m_labels;
     QList<QColor> m_colors;
     QList<std::pair<int, int>> m_times;
+    QList<bool> m_locked;
     bool m_includeBase = true;
 };

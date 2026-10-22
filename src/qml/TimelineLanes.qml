@@ -11,7 +11,9 @@ import Guckste.Core
 // scale. Drag the bar to move it in time, its edges to set when it comes
 // and goes; click to select the mark, double-click to go to its start,
 // right-click for more. Ctrl-click and Shift-click select several lanes,
-// which then move and stretch together.
+// which then move and stretch together. Dragged past the end, they make
+// the video longer: the timeline has room there, and more as a drag
+// nears its edge.
 ListView {
     id: lanes
 
@@ -24,6 +26,10 @@ ListView {
     property int trimStart: 0
     property int trimEnd: -1
     readonly property int duration: timeline.duration
+    // The timeline's scale, held while a bar is dragged so the bar stays
+    // under the pointer; 0 when nothing is.
+    property int heldSpan: 0
+    readonly property int span: timeline.shownSpan
     readonly property real laneHeight: 22
 
     signal picked(int index)
@@ -56,18 +62,20 @@ ListView {
         picked(index)
     }
 
-    // The selected lanes' timings, ends to the end made explicit.
+    // The selected lanes' timings, ends to the end made explicit; `open`
+    // tells those that were.
     function chosenTimings(): var {
         return chosen.map(i => ({
             index: i,
             start: document.annotationStart(i),
-            end: document.annotationEnd(i) < 0 ? duration : document.annotationEnd(i)
+            end: document.annotationEnd(i) < 0 ? duration : document.annotationEnd(i),
+            open: document.annotationEnd(i) < 0
         }))
     }
 
-    // Applies timings, an end at the very end staying "to the end".
+    // Applies timings, those with `open` set going to the end.
     function timingList(timings: var): var {
-        return timings.map(t => [t.index, t.start, t.end >= duration ? -1 : t.end])
+        return timings.map(t => [t.index, t.start, t.open ? -1 : t.end])
     }
 
     Connections {
@@ -187,12 +195,21 @@ ListView {
             // "move", "in", "out"
             property string mode: ""
             property real pressX
+            // The time under the pointer when pressed, which the drag
+            // counts from even as the scale changes.
+            property int pressMs
+            // How long the video was then, before the drag changed it.
+            property int pressDuration
+            property real lastX
+            // Held at the right edge: the timeline makes room, a little
+            // at a time.
+            property bool atEdge: false
             // The selected lanes' timings when the drag began.
             property var atPress: []
             property bool moved: false
 
             x: lanes.msToX(0) - 6
-            width: lanes.msToX(lanes.duration) - x + 12
+            width: lanes.msToX(lanes.span) - x + 12
             height: parent.height
             hoverEnabled: true
             preventStealing: true
@@ -244,41 +261,71 @@ ListView {
                 mode = edge !== "" ? edge : "move"
                 moved = false
                 pressX = event.x
+                pressMs = msAt(event.x)
+                pressDuration = lanes.duration
                 atPress = lanes.chosenTimings()
+                lanes.heldSpan = lanes.span
                 lanes.document.beginRetimeMany()
             }
             onPositionChanged: event => {
                 if (mode === "")
                     return
-                const minimum = 100
-                let delta = msAt(event.x) - msAt(pressX)
+                lastX = event.x
+                atEdge = mode !== "in" && lanes.msToX(lanes.span) - toLane(event.x) < 24
                 if (Math.abs(event.x - pressX) >= 2)
                     moved = true
+                follow(event.x)
+            }
+
+            // About a tenth more room a second, the scale shrinking, while
+            // the pointer stays at the edge.
+            Timer {
+                interval: 100
+                repeat: true
+                running: drag.atEdge && drag.mode !== ""
+                onTriggered: {
+                    lanes.heldSpan = lanes.span + Math.max(100, Math.round(lanes.span * 0.01))
+                    drag.follow(drag.lastX)
+                }
+            }
+
+            // The selected lanes, retimed for the pointer at `x`.
+            function follow(x: real) {
+                const minimum = 100
+                let delta = msAt(x) - pressMs
                 let timings
                 if (mode === "move") {
-                    // Together, held so none leaves the video.
+                    // Together, none before the start; past the end makes
+                    // the video longer. Those to the end stay so, wherever
+                    // they start.
                     const first = Math.min(...atPress.map(t => t.start))
-                    const last = Math.max(...atPress.map(t => t.end))
-                    delta = Math.max(-first, Math.min(lanes.duration - last, delta))
-                    timings = atPress.map(t => ({ index: t.index, start: t.start + delta, end: t.end + delta }))
+                    const last = Math.max(...atPress.map(t => t.open ? t.start : t.end))
+                    delta = Math.max(-first, Math.min(lanes.span - last, delta))
+                    timings = atPress.map(t => ({ index: t.index, start: t.start + delta, end: t.end + delta, open: t.open }))
                 } else if (mode === "in") {
                     timings = atPress.map(t => ({
                         index: t.index,
                         start: Math.max(0, Math.min(t.end - minimum, t.start + delta)),
-                        end: t.end
+                        end: t.end,
+                        open: t.open
                     }))
                 } else {
-                    timings = atPress.map(t => ({
-                        index: t.index,
-                        start: t.start,
-                        end: Math.min(lanes.duration, Math.max(t.start + minimum, t.end + delta))
-                    }))
+                    // Let go at the end, it goes to the end; past it, it
+                    // ends there, and the video with it.
+                    const snap = lanes.timeline.xToMs(lanes.timeline.margin + 6)
+                    timings = atPress.map(t => {
+                        const end = Math.min(lanes.span, Math.max(t.start + minimum, t.end + delta))
+                        const atEnd = Math.abs(end - pressDuration) <= snap
+                        return { index: t.index, start: t.start, end: end, open: atEnd }
+                    })
                 }
                 lanes.document.retimeMany(lanes.timingList(timings))
             }
             onReleased: {
                 if (mode !== "")
                     lanes.document.endRetime()
+                atEdge = false
+                lanes.heldSpan = 0
                 // A click on a bar of several selected: that one alone.
                 if (mode === "move" && !moved && lanes.chosen.length > 1)
                     lanes.choose(lane.index, lane.layerIndex, Qt.NoModifier)
@@ -298,7 +345,7 @@ ListView {
                 text: qsTr("Show from the playhead")
                 onTriggered: lanes.document.setTimings(lanes.timingList(lanes.chosenTimings()
                     .filter(t => lanes.position < t.end)
-                    .map(t => ({ index: t.index, start: lanes.position, end: t.end }))))
+                    .map(t => ({ index: t.index, start: lanes.position, end: t.end, open: t.open }))))
             }
             MenuItem {
                 text: qsTr("Hide from the playhead")

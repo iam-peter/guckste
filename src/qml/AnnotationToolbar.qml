@@ -150,12 +150,15 @@ ToolBar {
 
     // In order: the groups of the bar, then each of the window's actions.
     // What fits stays in the row, the rest goes behind the more button.
+    // An action with `available` false is left out altogether.
+    property var allUnits: []
     property var units: []
     readonly property int unitSpacing: 2
 
     function relayout() {
-        if (units.length === 0)
+        if (allUnits.length === 0)
             return
+        units = allUnits.filter(unit => unit.available !== false)
         let all = 0
         for (let i = 0; i < units.length; ++i)
             all += units[i].implicitWidth + (i > 0 ? unitSpacing : 0)
@@ -176,7 +179,7 @@ ToolBar {
             fit = Math.max(fit, 1)
         }
         // Parked first, then placed in order, so both keep the bar's order.
-        for (const unit of units)
+        for (const unit of allUnits)
             unit.parent = stash
         moreButton.parent = stash
         for (let i = 0; i < units.length; ++i)
@@ -204,9 +207,12 @@ ToolBar {
             list.push(actionsSeparator)
         for (const child of Array.from(actionsRow.children))
             list.push(child)
-        units = list
-        for (const unit of units)
+        allUnits = list
+        for (const unit of allUnits) {
             unit.implicitWidthChanged.connect(relayoutLater)
+            if (unit.availableChanged)
+                unit.availableChanged.connect(relayoutLater)
+        }
         relayout()
     }
 
@@ -271,7 +277,8 @@ ToolBar {
                 required property var modelData
                 iconName: modelData.icon
                 tip: modelData.tip
-                checkable: true
+                // Shows the tool rather than toggling: a click on the one
+                // in use leaves it in use.
                 checked: bar.tool === modelData.tool
                 onClicked: bar.toolPicked(modelData.tool)
             }

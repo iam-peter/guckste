@@ -6,9 +6,10 @@ import QtQuick.Layouts
 import Guckste
 import Guckste.Core
 
-// Every mark and added image of a document, topmost first, with the
-// screenshot at the bottom: pick one to select it, raise, lower or remove
-// it. Double-clicking a text edits it.
+// Every layer of a document, topmost first, the screenshot it opened with
+// at the bottom: pick one to select it, lock or unlock it, raise, lower
+// or remove it. Double-clicking a text edits it. A locked layer stays put
+// on the canvas, and clicks there go to what is below.
 Pane {
     id: panel
 
@@ -51,6 +52,7 @@ Pane {
                 required property string label
                 required property color layerColor
                 required property bool isBase
+                required property bool locked
 
                 readonly property bool current: !isBase && layerIndex === panel.document.selectedIndex
                 readonly property int count: panel.document.annotationCount
@@ -77,13 +79,13 @@ Pane {
                 contentItem: RowLayout {
                     spacing: 6
                     Icon {
-                        name: row.isBase ? "lock" : Icons.forTool(row.kind)
+                        name: row.isBase ? "image" : Icons.forTool(row.kind)
                         color: row.palette.text
                         opacity: 0.8
                     }
                     Rectangle {
                         visible: !row.isBase
-                        opacity: row.kind !== Document.Image ? 1 : 0
+                        opacity: row.kind !== Document.Image && row.kind !== Document.Video ? 1 : 0
                         implicitWidth: 10
                         implicitHeight: 10
                         radius: 5
@@ -95,7 +97,20 @@ Pane {
                         text: row.label
                         elide: Text.ElideRight
                         font.pixelSize: 12
-                        opacity: row.isBase ? 0.7 : 1
+                        opacity: row.locked ? 0.7 : 1
+                    }
+                    // Always shown while locked, so a locked layer says so.
+                    IconButton {
+                        objectName: "lockButton"
+                        visible: !row.isBase
+                        opacity: row.locked || row.showButtons ? 1 : 0
+                        iconName: row.locked ? "lock" : "lock-open"
+                        tip: row.locked ? qsTr("Unlock, to move, resize or remove it") : qsTr("Lock in place")
+                        enabled: row.locked || row.showButtons
+                        implicitWidth: 22
+                        implicitHeight: 22
+                        padding: 3
+                        onClicked: panel.document.setLocked(row.layerIndex, !row.locked)
                     }
                     // Up the list is up the stack.
                     IconButton {
@@ -124,8 +139,8 @@ Pane {
                         visible: !row.isBase
                         opacity: row.showButtons ? 1 : 0
                         iconName: "trash-2"
-                        tip: qsTr("Remove (Delete)")
-                        enabled: row.showButtons
+                        tip: row.locked ? qsTr("Unlock it to remove it") : qsTr("Remove (Delete)")
+                        enabled: row.showButtons && !row.locked
                         implicitWidth: 22
                         implicitHeight: 22
                         padding: 3
@@ -142,7 +157,7 @@ Pane {
             wrapMode: Text.WordWrap
             font.pixelSize: 12
             opacity: 0.7
-            text: qsTr("Marks and added images show up here.")
+            text: qsTr("Marks, images and videos show up here.")
         }
     }
 }

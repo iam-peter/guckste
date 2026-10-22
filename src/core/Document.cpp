@@ -1,6 +1,7 @@
 #include "Document.h"
 
 #include "AnnotationPainter.h"
+#include "VideoFrames.h"
 
 #include <QBuffer>
 #include <QClipboard>
@@ -13,6 +14,8 @@
 #include <QMimeData>
 #include <QPainter>
 #include <QtMath>
+
+#include <algorithm>
 
 namespace {
 
@@ -36,6 +39,7 @@ Annotation::Type toType(int tool)
     case Document::Counter: return Annotation::Type::Counter;
     case Document::Measure: return Annotation::Type::Measure;
     case Document::Image: return Annotation::Type::Image;
+    case Document::Video: return Annotation::Type::Video;
     case Document::Select: break;
     }
     return Annotation::Type::Pen;
@@ -55,6 +59,7 @@ int toTool(Annotation::Type type)
     case Annotation::Type::Counter: return Document::Counter;
     case Annotation::Type::Measure: return Document::Measure;
     case Annotation::Type::Image: return Document::Image;
+    case Annotation::Type::Video: return Document::Video;
     }
     return Document::Pen;
 }
@@ -85,6 +90,7 @@ QPointF constrainSquare(const QPointF &from, const QPointF &to)
 } // namespace
 
 int Document::s_nextId = 1;
+int Document::s_nextClip = 1;
 
 Document::Document(QObject *parent)
     : QObject(parent), m_id(s_nextId++)
@@ -120,9 +126,9 @@ void Document::updateCanvas()
     // Not while something is dragged: the view would shift under it.
     if (m_moving >= 0 || m_editing >= 0)
         return;
-    QRect canvas = m_image.rect();
+    QRect canvas = m_image.isNull() ? QRect() : m_image.rect();
     for (const Annotation &a : std::as_const(m_annotations)) {
-        if (a.type == Annotation::Type::Image)
+        if (a.isPicture())
             canvas |= a.rect().toAlignedRect();
     }
     if (canvas == m_canvas)
@@ -258,6 +264,9 @@ void Document::commitAnnotation()
     if (!a.isEmpty()) {
         pushUndo();
         m_annotations.append(a);
+        // Selected, so the toolbar's color and size go to it right away.
+        m_selected = m_annotations.size() - 1;
+        emit selectedIndexChanged();
     }
     emit changed();
 }
@@ -344,7 +353,7 @@ int Document::hitTest(qreal x, qreal y, qreal scale) const
     AnnotationPainter painter(dummy, none, scale);
     const QPointF p(x, y);
     for (int i = m_annotations.size() - 1; i >= 0; --i) {
-        if (!m_annotations[i].shownAt(m_time))
+        if (!m_annotations[i].shownAt(m_time) || m_annotations[i].locked)
             continue;
         const qreal margin = 4 / scale;
         if (painter.bounds(m_annotations[i]).adjusted(-margin, -margin, margin, margin).contains(p))
@@ -365,7 +374,7 @@ QRectF Document::annotationBounds(int index, qreal scale) const
 
 void Document::beginMove(int index)
 {
-    if (index < 0 || index >= m_annotations.size())
+    if (index < 0 || index >= m_annotations.size() || m_annotations[index].locked)
         return;
     pushUndo();
     m_moving = index;
@@ -391,7 +400,7 @@ void Document::endMove()
 // An image sits on whole pixels, so it stays as sharp as the screenshot.
 void Document::snapImage(int index)
 {
-    if (index < 0 || index >= m_annotations.size() || m_annotations[index].type != Annotation::Type::Image)
+    if (index < 0 || index >= m_annotations.size() || !m_annotations[index].isPicture())
         return;
     for (QPointF &p : m_annotations[index].points)
         p = QPointF(qRound(p.x()), qRound(p.y()));
@@ -496,7 +505,8 @@ bool Document::clipboardHasImage() const
 
 QVariantList Document::handlePoints(int index) const
 {
-    if (index < 0 || index >= m_annotations.size() || !m_annotations[index].shownAt(m_time))
+    if (index < 0 || index >= m_annotations.size() || !m_annotations[index].shownAt(m_time)
+        || m_annotations[index].locked)
         return {};
     const Annotation &a = m_annotations[index];
     QVariantList points;
@@ -513,7 +523,7 @@ QVariantList Document::handlePoints(int index) const
 
 void Document::beginHandleDrag(int index)
 {
-    if (index < 0 || index >= m_annotations.size())
+    if (index < 0 || index >= m_annotations.size() || m_annotations[index].locked)
         return;
     pushUndo();
     m_editing = index;
@@ -559,11 +569,11 @@ void Document::dragHandle(int handle, qreal x, qreal y, int modifiers)
     if (handle == 0 || handle == 1 || handle == 2) top = p.y();
     if (handle == 4 || handle == 5 || handle == 6) bottom = p.y();
 
-    // From a corner, an image keeps its shape unless Shift is held, and
-    // the other boxes become squares with Shift.
-    const bool keepShape = a.type == Annotation::Type::Image ? !shift : shift;
+    // From a corner, an image or clip keeps its shape unless Shift is
+    // held, and the other boxes become squares with Shift.
+    const bool keepShape = a.isPicture() ? !shift : shift;
     if (corner && keepShape && start.height() > 0) {
-        const qreal aspect = a.type == Annotation::Type::Image ? start.width() / start.height() : 1;
+        const qreal aspect = a.isPicture() ? start.width() / start.height() : 1;
         const QPointF anchor(handle == 0 || handle == 6 ? start.right() : start.left(),
                              handle == 0 || handle == 2 ? start.bottom() : start.top());
         qreal w = std::abs(p.x() - anchor.x());
@@ -608,7 +618,7 @@ void Document::endHandleDrag()
 
 void Document::removeAnnotation(int index)
 {
-    if (index < 0 || index >= m_annotations.size())
+    if (index < 0 || index >= m_annotations.size() || m_annotations[index].locked)
         return;
     pushUndo();
     m_annotations.removeAt(index);
@@ -686,47 +696,6 @@ QImage Document::render(qreal scale, const QRect &region) const
     return out;
 }
 
-void Document::setBackdropFrame(const QVideoFrame &frame)
-{
-    if (!frame.isValid())
-        return;
-    m_backdropFrame = frame;
-    m_backdropStale = true;
-    for (const Annotation &a : std::as_const(m_annotations)) {
-        if (a.type == Annotation::Type::Pixelate && a.shownAt(m_time)) {
-            emit backdropChanged();
-            return;
-        }
-    }
-}
-
-void Document::followVideo(QVideoSink *sink)
-{
-    if (m_followed == sink)
-        return;
-    if (m_followed)
-        disconnect(m_followed, nullptr, this, nullptr);
-    m_followed = sink;
-    if (sink)
-        connect(sink, &QVideoSink::videoFrameChanged, this, &Document::setBackdropFrame);
-}
-
-const QImage &Document::baseImage() const
-{
-    if (!m_backdropFrame.isValid())
-        return m_image;
-    if (m_backdropStale) {
-        m_backdropStale = false;
-        QVideoFrame frame = m_backdropFrame;
-        QImage image = frame.toImage();
-        // On the screenshot's pixels, which the marks are placed on.
-        if (!m_image.isNull() && image.size() != m_image.size())
-            image = image.scaled(m_image.size(), Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
-        m_backdropImage = image.convertToFormat(QImage::Format_ARGB32_Premultiplied);
-    }
-    return m_backdropImage.isNull() ? m_image : m_backdropImage;
-}
-
 void Document::setTime(int ms)
 {
     if (m_time == ms)
@@ -761,9 +730,40 @@ void Document::setAnnotationTiming(int index, int startMs, int endMs)
     if (a.startMs == startMs && a.endMs == endMs)
         return;
     pushUndo();
-    m_annotations[index].startMs = startMs;
-    m_annotations[index].endMs = endMs;
+    applyTiming(index, startMs, endMs);
     emit changed();
+}
+
+void Document::applyTiming(int index, int startMs, int endMs)
+{
+    Annotation &a = m_annotations[index];
+    if (a.type != Annotation::Type::Video) {
+        a.startMs = startMs;
+        a.endMs = endMs;
+        return;
+    }
+    // From how the clip was when the change began, the last undo step.
+    const Annotation before = !m_undo.isEmpty() && index < m_undo.last().size()
+                                      && m_undo.last()[index].clip == a.clip
+                                  ? m_undo.last()[index]
+                                  : a;
+    const int length = before.endMs - before.startMs;
+    const int minimum = qMin(100, before.sourceMs);
+    if (endMs < 0)
+        endMs = startMs + length;
+    if (startMs != before.startMs && endMs == before.endMs) {
+        // Its start alone: the clip starts later or earlier in the video.
+        const int clipIn = qBound(0, before.clipIn + startMs - before.startMs,
+                                  qMax(0, before.clipIn + length - minimum));
+        startMs = before.startMs + clipIn - before.clipIn;
+        a.clipIn = clipIn;
+    } else {
+        a.clipIn = before.clipIn;
+        // Moved, or its end: no further than the video goes.
+        endMs = qBound(startMs + minimum, endMs, startMs + before.sourceMs - before.clipIn);
+    }
+    a.startMs = startMs;
+    a.endMs = endMs;
 }
 
 void Document::beginRetime(int index)
@@ -781,8 +781,7 @@ void Document::retime(int startMs, int endMs)
     startMs = qMax(0, startMs);
     if (endMs >= 0 && endMs <= startMs)
         return;
-    m_annotations[m_retiming].startMs = startMs;
-    m_annotations[m_retiming].endMs = endMs;
+    applyTiming(m_retiming, startMs, endMs);
     emit changed();
 }
 
@@ -808,11 +807,10 @@ void Document::retimeMany(const QVariantList &timings)
         const int end = t[2].toInt();
         if (index < 0 || index >= m_annotations.size() || (end >= 0 && end <= start))
             continue;
-        Annotation &a = m_annotations[index];
+        const Annotation &a = m_annotations[index];
         if (a.startMs == start && a.endMs == end)
             continue;
-        a.startMs = start;
-        a.endMs = end;
+        applyTiming(index, start, end);
         any = true;
     }
     if (any)
@@ -890,7 +888,7 @@ void Document::paintLayers(QPainter &painter, qreal scale, const QPointF &origin
                            bool withCurrent) const
 {
     const int count = upTo < 0 ? m_annotations.size() : qMin<int>(upTo, m_annotations.size());
-    const QImage &base = withBase ? baseImage() : m_image;
+    const QImage &base = m_image;
     if (withBase && !base.isNull()) {
         painter.save();
         // Enlarging keeps every pixel a crisp block, shrinking averages them.
@@ -902,6 +900,13 @@ void Document::paintLayers(QPainter &painter, qreal scale, const QPointF &origin
     const auto paintOne = [&](const Annotation &a, int below) {
         if (a.type == Annotation::Type::Pixelate)
             marks.setBackdrop([this, below](const QRect &rect) { return backdrop(below, rect); });
+        if (a.type == Annotation::Type::Video) {
+            // The frame it is at.
+            Annotation frame = a;
+            frame.image = clipImage(a);
+            marks.paint(frame);
+            return;
+        }
         marks.paint(a);
     };
     for (int i = 0; i < count; ++i) {
@@ -982,4 +987,226 @@ QColor Document::pixelAt(int x, int y) const
         return {};
     // What is seen there, added images and marks included.
     return backdrop(-1, QRect(x, y, 1, 1)).pixelColor(0, 0);
+}
+
+int Document::duration() const
+{
+    return durationOf(m_annotations);
+}
+
+int Document::durationOf(const QList<Annotation> &layers)
+{
+    // Without a clip there is no time; with one, whatever is set to end
+    // later makes it longer.
+    const bool video = std::any_of(layers.cbegin(), layers.cend(),
+                                   [](const Annotation &a) { return a.type == Annotation::Type::Video; });
+    int end = 0;
+    if (video) {
+        for (const Annotation &a : layers)
+            end = qMax(end, a.endMs);
+    }
+    return end;
+}
+
+bool Document::hasVideo() const
+{
+    return std::any_of(m_annotations.cbegin(), m_annotations.cend(),
+                       [](const Annotation &a) { return a.type == Annotation::Type::Video; });
+}
+
+QString Document::name() const
+{
+    if (!m_filePath.isEmpty())
+        return QFileInfo(m_filePath).fileName();
+    for (const Annotation &a : m_annotations) {
+        if (a.type == Annotation::Type::Video)
+            return QFileInfo(a.source).fileName();
+    }
+    return {};
+}
+
+void Document::liftBase(const QString &name)
+{
+    if (m_image.isNull())
+        return;
+    Annotation base;
+    base.type = Annotation::Type::Image;
+    base.image = m_image;
+    base.name = name;
+    base.locked = true;
+    base.points = {QPointF(0, 0), QPointF(m_image.width(), m_image.height())};
+    m_annotations.prepend(base);
+    if (m_selected >= 0)
+        ++m_selected;
+    m_image = QImage();
+    ++m_imageVersion;
+    emit imageChanged();
+    emit changed();
+}
+
+bool Document::annotationLocked(int index) const
+{
+    return index >= 0 && index < m_annotations.size() && m_annotations[index].locked;
+}
+
+void Document::setLocked(int index, bool locked)
+{
+    if (index < 0 || index >= m_annotations.size() || m_annotations[index].locked == locked)
+        return;
+    pushUndo();
+    m_annotations[index].locked = locked;
+    emit changed();
+}
+
+int Document::addVideo(const VideoInfo &video, Placement placement)
+{
+    if (!video.isValid())
+        return -1;
+    m_current.reset();
+    Annotation a;
+    a.type = Annotation::Type::Video;
+    a.source = video.path;
+    a.name = QFileInfo(video.path).fileName();
+    a.sourceMs = int(video.durationMs);
+    a.clip = s_nextClip++;
+    a.image = video.poster;
+    QPointF at(0, 0);
+    if (placement == Placement::After && hasVideo()) {
+        // Where the clip that ends last is, from its end on.
+        const Annotation *last = nullptr;
+        for (const Annotation &other : std::as_const(m_annotations)) {
+            if (other.type == Annotation::Type::Video && (!last || other.endMs >= last->endMs))
+                last = &other;
+        }
+        at = last->rect().topLeft();
+        a.startMs = last->endMs;
+    } else if (placement != Placement::Base && !m_canvas.isEmpty()) {
+        at = QPointF(m_canvas.right() + 1, m_canvas.top());
+    }
+    a.endMs = a.startMs + a.sourceMs;
+    a.points = {at, at + QPointF(video.size.width(), video.size.height())};
+    if (placement == Placement::Base) {
+        // What the editor opens: as it was, and not to be dragged about.
+        a.locked = true;
+        m_annotations.prepend(a);
+        emit changed();
+        return 0;
+    }
+    pushUndo();
+    m_annotations.append(a);
+    m_selected = m_annotations.size() - 1;
+    emit selectedIndexChanged();
+    emit changed();
+    return m_selected;
+}
+
+void Document::addVideoFile(const QString &path, bool after)
+{
+    VideoProbe::probe(path, this, [this, after](const VideoInfo &video) {
+        const int index = addVideo(video, after ? Placement::After : Placement::Beside);
+        if (index < 0)
+            emit videoFailed(video.path);
+        else
+            emit videoAdded(index);
+    });
+}
+
+void Document::setClipFrame(int clip, const QVideoFrame &frame)
+{
+    if (!frame.isValid())
+        return;
+    ClipFrame &entry = m_clipFrames[clip];
+    if (entry.frame == frame)
+        return;
+    entry.frame = frame;
+    entry.stale = true;
+    for (const Annotation &a : std::as_const(m_annotations)) {
+        if (a.clip == clip && a.type == Annotation::Type::Video && a.shownAt(m_time)) {
+            emit framesChanged();
+            return;
+        }
+    }
+}
+
+void Document::setClipImage(int clip, const QImage &image)
+{
+    ClipFrame &entry = m_clipFrames[clip];
+    entry.frame = QVideoFrame();
+    entry.image = image;
+    entry.stale = false;
+}
+
+QImage Document::clipImage(const Annotation &clip) const
+{
+    const auto found = m_clipFrames.find(clip.clip);
+    if (found == m_clipFrames.end())
+        return clip.image;
+    if (found->stale) {
+        found->stale = false;
+        found->image = VideoFrames::toImage(found->frame).convertToFormat(QImage::Format_ARGB32_Premultiplied);
+    }
+    return found->image.isNull() ? clip.image : found->image;
+}
+
+Document *Document::frameDocument() const
+{
+    auto *still = new Document;
+    QList<Annotation> layers;
+    for (const Annotation &a : m_annotations) {
+        if (!a.shownAt(m_time))
+            continue;
+        Annotation layer = a;
+        if (a.type == Annotation::Type::Video) {
+            layer.type = Annotation::Type::Image;
+            layer.image = clipImage(a);
+            layer.source.clear();
+            layer.clip = 0;
+            if (layer.image.isNull())
+                continue;
+            const int at = qMax(0, m_time - a.startMs + a.clipIn);
+            layer.name = tr("%1 at %2:%3.%4")
+                             .arg(a.name)
+                             .arg(at / 60000)
+                             .arg(at / 1000 % 60, 2, 10, QLatin1Char('0'))
+                             .arg(at / 100 % 10);
+        }
+        layer.startMs = 0;
+        layer.endMs = -1;
+        layers << layer;
+    }
+    still->m_annotations = layers;
+    still->m_guides = m_guides;
+    emit still->changed();
+    return still;
+}
+
+void Document::setLayers(const QList<Annotation> &layers)
+{
+    m_current.reset();
+    m_annotations = layers;
+    m_selected = -1;
+    emit changed();
+}
+
+void Document::markSaved()
+{
+    setModified(false);
+}
+
+void Document::relinkSource(const QString &from, const QString &to)
+{
+    const auto relink = [&](QList<Annotation> &layers) {
+        for (Annotation &a : layers) {
+            if (a.type == Annotation::Type::Video && a.source == from) {
+                a.source = to;
+                a.name = QFileInfo(to).fileName();
+            }
+        }
+    };
+    relink(m_annotations);
+    for (QList<Annotation> &step : m_undo)
+        relink(step);
+    for (QList<Annotation> &step : m_redo)
+        relink(step);
+    emit changed();
 }
