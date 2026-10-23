@@ -54,6 +54,8 @@ quits the running one and takes its place, for a new build):
   without asking.
 - `guckste record` — pick a region to record, or stop the recording that
   is running. Bound to a key, one key starts and stops.
+- `guckste still` — while recording, keep the frame shown now as a
+  lossless still (see Stills).
 - `guckste open [file]` — the editor, with a file dialog when no file is
   given.
 - `guckste settings`, `guckste quit`.
@@ -123,8 +125,11 @@ which asks for the Accessibility permission. Wayland has no way to
 listen, so the option is not offered there. Every key on the desktop is
 seen while that is on, so leave it off when typing a password.
 
-Stopping opens the recording in the editor (the settings can send it
-straight to the screenshot folder instead), as a clip on the canvas,
+Every recording gets a folder of its own in the screenshot folder, named
+by the file name pattern, with the video in it under the same name and
+its stills beside it, so a flow stays together. Stopping opens the
+recording in the editor (the settings can send it straight to its
+folder instead), as a clip on the canvas,
 locked like a screenshot until it is unlocked in the layer panel. With a
 video in it the editor has a timeline below the canvas. The same tools
 draw on the video, at the size they will have in the file. Space plays
@@ -152,11 +157,13 @@ the right-click actions go to all of them too. The lanes scroll, and the
 divider above the controls makes room for more of them. A pixelated
 area coarsens the frame on screen, as it will in the saved video.
 
-Save (Ctrl+S) writes the video to the screenshot folder: every frame is
-the canvas at its time, each clip at its frame, the marks and images in
-their order, the clips' sound mixed, the trimmed parts left out. A
-recording saved as it is, one clip, untrimmed and unmarked, is moved
-there instead. Closing without saving deletes the recording. The camera
+Save (Ctrl+S) writes the video into the recording's folder (another
+video into the screenshot folder): every frame is the canvas at its
+time, each clip at its frame, the marks and images in their order, the
+clips' sound mixed, the trimmed parts left out. A recording saved as it
+is, one clip, untrimmed and unmarked, is moved there instead, and the
+stills of the part kept are copied beside it. Closing without saving
+deletes the recording and its stills. The camera
 button (Ctrl+Shift+F) opens the frame on screen in a new editor, each
 clip as an image of that frame and every mark still editable, to save as
 a picture; Copy copies the frame. `guckste open talk.mp4`, or Open in
@@ -177,6 +184,52 @@ whether the microphone is recorded.
 
 On X11 the region may span screens (Qt captures the whole desktop there).
 Elsewhere it is clipped to the screen under its center.
+
+### Stills
+
+A video is lossy: each frame is encoded as it is recorded, and a frame
+taken out of it later has blurred colors and the encoder's traces. So
+the recorder keeps stills as they were on screen, PNGs beside the video
+in the recording's folder (`01-before-click.png`, `02-after-click.png`,
+`03-change.png`, `04-kept.png`, …). The camera button on the
+panel, the tray's Keep a Still and `guckste still` keep the frame shown
+now. With "Keep lossless stills before and after each click" in the
+settings, every click in the region keeps two: the frame before it, with
+the pointer over what is clicked and its hover state, and the frame
+after it once the screen has stayed the same for 0.3 seconds, up to 4
+seconds while something keeps moving. A click that changes nothing within
+2 seconds keeps only the one before, and a picture the same as the last
+still is not kept twice. Clicks are heard as keys are, so not on Wayland.
+
+"Keep lossless stills of what the screen settles on after it changes"
+needs no click: when as many pixels as a tooltip covers (1200) differ
+from where the screen last settled, the frame it settles on, the same for
+0.3 seconds, is kept; a blinking caret or a clock's digits are too few
+to count, however far apart. A change that keeps moving is
+kept every 4 seconds, and a click's own stills stand for the change it
+makes. It works everywhere, Wayland too, and catches what only hovering
+shows, a tooltip or a highlighted row.
+
+The stills are without the pointer, which is kept beside them. In the
+editor they are marks on the timeline: a click close by or Ctrl+. and
+Ctrl+, go to one, and there the editor shows the still itself, the
+pointer painted in, in place of the decoded frame. The camera button
+then opens it lossless, the pointer a layer of its own to keep, move or
+delete, and Copy copies it. The grid button opens the stills of the part
+kept between the timeline's handles as one picture, in rows of three,
+each with its pointer as a layer, up to 24 of them (fewer of a 4K
+screen, to keep the picture to 50 megapixels), to mark up and save
+as one image of the whole flow; the image button saves them into the
+recording's folder without the video. A recording opened in the editor
+keeps its stills in a temporary folder while the editor is open, until
+saving copies them over; one that goes straight to its folder keeps them
+there.
+
+"Keep only the stills of a recording, without the video" records no
+video at all: nothing is encoded, and the folder holds the stills only.
+Stopping then opens them as one picture in the editor, or, with the
+editor off after recording, leaves them in the folder. A video that
+fails to record keeps its stills the same way.
 
 ### The editor
 
@@ -247,8 +300,10 @@ exporting at 100 %, otherwise it asks for a name; Save as…
   name pattern (`guckste_%Y-%m-%d_%H-%M-%S`, with strftime's `%Y %m %d %H
   %M %S %b %a`; a number is appended when the name is taken; recordings
   use it too).
-- Whether the pointer is in screenshots and recordings, and whether the
-  keys pressed are shown on recordings.
+- Whether the pointer is in screenshots and recordings, whether the
+  keys pressed are shown on recordings, whether a click or a change of
+  the screen keeps stills, and whether a recording keeps only its
+  stills.
 - Whether a saved file's path goes to the clipboard, and the editor's
   pixel grid from 800 %.
 - Recording: the frame rate (15, 24, 30 or 60 fps), the quality, the
@@ -283,7 +338,8 @@ noticeably slower to open the picker and to grab the screen.
 for each command, and the icon. `tst_ui` saves screenshots of the windows
 when `GUCKSTE_SCREENSHOT_DIR` is set, and stages the screenshots of this
 README and the site on a made-up desktop into the folder
-`GUCKSTE_SITE_SHOTS` names (`docs/screenshots`). `tst_recorder` records the
+`GUCKSTE_SITE_SHOTS` names (`docs/screenshots`), the stills guide's
+(`pages/stills.html`) among them. `tst_recorder` records the
 screen for a few seconds to the file `GUCKSTE_LIVE_RECORD` names. To try a
 build next to the Guckste in use, give it its own instance name:
 `GUCKSTE_INSTANCE=dev ./build/bin/guckste`.
@@ -299,9 +355,12 @@ build next to the Guckste in use, give it its own instance name:
   panel and the lanes), `ScreenCapture` (every screen through Qt, the X
   root window through shared memory, or the desktop portal on Wayland),
   `WindowFinder` (the windows on screen, for picking one), `CursorCapture`
-  and `KeyListener` with `KeyOverlay` (the pointer and the keys pressed,
-  per platform), `ScreenRecorder` (QScreenCapture frames cropped to the
-  region and encoded by QMediaRecorder), `Playback` (a clock for the
+  and `KeyListener` with `KeyOverlay` (the pointer, the keys pressed and
+  the clicks, per platform), `ScreenRecorder` (QScreenCapture frames
+  cropped to the region and encoded by QMediaRecorder), `StillKeeper`
+  (which frames to keep lossless: when asked, around clicks, and where
+  the screen settles after a change),
+  `Playback` (a clock for the
   document's time, with a player per clip that follows it),
   `VideoExporter` (decodes the clips as their time comes and puts every
   frame together from them and the marks, mixing their sound, into a

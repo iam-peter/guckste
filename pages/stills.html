@@ -1,0 +1,371 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lossless Stills · Guckste</title>
+<meta name="description" content="How Guckste keeps lossless screenshots while recording the screen: on a click of the camera button, a key, before and after every click, or whenever the screen settles after a change, found again on the editor's timeline.">
+<link rel="icon" href="guckste.svg" type="image/svg+xml">
+<style>
+  :root {
+    --bg: #fbf8f7;
+    --fg: #22171c;
+    --muted: #6b5a61;
+    --card: #ffffff;
+    --border: #e8dde1;
+    --code-bg: #1b1218;
+    --code-fg: #f7e2ea;
+    --accent: #d93a6a;
+    --accent-strong: #f0426b;
+    --before: #ffd60a;
+    --after: #ff9f0a;
+    --kept: #0a84ff;
+    --change: #bf5af2;
+    --track: #e9dfe3;
+    --changing: #f3c6d4;
+    --gradient: linear-gradient(135deg, #ff8a3d 0%, #f0426b 55%, #8e2de2 100%);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #140d11;
+      --fg: #f1e6ea;
+      --muted: #a8949c;
+      --card: #1d1419;
+      --border: #352730;
+      --code-bg: #0c0709;
+      --accent: #ff9a6b;
+      --track: #2c2027;
+      --changing: #5a2a3b;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--fg);
+    font: 16px/1.6 system-ui, -apple-system, "Segoe UI", Roboto, Ubuntu, sans-serif;
+  }
+  a { color: var(--accent); }
+  main { max-width: 920px; margin: 0 auto; padding: 0 16px 64px; }
+
+  nav { padding: 20px 0 0; font-size: 0.95rem; }
+  nav a { text-decoration: none; display: inline-flex; align-items: center; gap: 8px; }
+  nav img { width: 24px; height: 24px; }
+
+  header { padding: 40px 0 16px; }
+  h1 { font-size: 2.6rem; margin: 0 0 8px; letter-spacing: -0.02em; line-height: 1.15; }
+  .tagline { color: var(--muted); font-size: 1.15rem; max-width: 680px; margin: 0; }
+
+  h2 { font-size: 1.5rem; margin: 48px 0 8px; }
+  h3 { font-size: 1.1rem; margin: 28px 0 6px; }
+  p { margin: 8px 0; }
+  .note { color: var(--muted); font-size: 0.95rem; }
+  code { font: 0.92em ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+  kbd {
+    font: 0.85em ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    padding: 1px 6px; border: 1px solid var(--border); border-bottom-width: 2px;
+    border-radius: 5px; background: var(--card); white-space: nowrap;
+  }
+
+  .shot {
+    display: block; width: 100%; height: auto; margin: 16px 0 8px;
+    border-radius: 12px; border: 1px solid var(--border);
+    box-shadow: 0 20px 50px rgb(0 0 0 / 0.12);
+  }
+  figure { margin: 16px 0 32px; }
+  figcaption { color: var(--muted); font-size: 0.95rem; margin-top: 8px; }
+
+  .ways { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; margin: 20px 0; }
+  .way {
+    background: var(--card); border: 1px solid var(--border); border-radius: 12px;
+    padding: 16px 18px;
+  }
+  .way h3 { margin: 4px 0 6px; display: flex; align-items: center; gap: 8px; }
+  .way p { font-size: 0.95rem; }
+  .way svg { flex: none; }
+  @media (max-width: 760px) { .ways { grid-template-columns: 1fr; } }
+
+  /* Pixels to look at closely: at their own size, never smoothed. */
+  .shot.pixels { width: auto; max-width: 100%; image-rendering: pixelated; }
+  .shot.part { width: auto; max-width: 100%; }
+
+  .code { background: var(--code-bg); color: var(--code-fg); border-radius: 10px; margin: 12px 0; }
+  .code pre { margin: 0; padding: 14px 16px; overflow-x: auto; font: 13.5px/1.55 ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+
+  .diagram { margin: 20px 0 8px; overflow-x: auto; }
+  .diagram svg { display: block; width: 100%; min-width: 640px; height: auto; }
+  .diagram text { font: 13px system-ui, -apple-system, "Segoe UI", Roboto, Ubuntu, sans-serif; fill: var(--fg); }
+  .diagram .muted { fill: var(--muted); }
+
+  ul.rules { padding-left: 20px; }
+  ul.rules li { margin: 6px 0; }
+
+  table { border-collapse: collapse; width: 100%; margin: 12px 0; }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  th { color: var(--muted); font-weight: 600; font-size: 0.9rem; }
+  td:first-child { white-space: nowrap; }
+
+  .legend { display: flex; flex-wrap: wrap; gap: 18px; margin: 8px 0; font-size: 0.95rem; }
+  .legend span { display: inline-flex; align-items: center; gap: 8px; }
+  .diamond { width: 9px; height: 9px; transform: rotate(45deg); border: 1px solid rgb(0 0 0 / 0.6); display: inline-block; }
+
+  footer { text-align: center; color: var(--muted); font-size: 0.9rem; padding-top: 48px; }
+</style>
+</head>
+<body>
+<main>
+  <nav><a href="./"><img src="guckste.svg" alt="">Guckste</a></nav>
+
+  <header>
+    <h1>Lossless stills</h1>
+    <p class="tagline">Screenshots taken while you record: the exact pixels of a
+      moment, kept when you ask, around every click or whenever the screen
+      settles on something new, and found again on the editor&rsquo;s timeline.</p>
+  </header>
+
+  <h2>Why not just take a frame of the video?</h2>
+  <p>A video is compressed while it is recorded. Each frame loses most of its
+    color detail and gets the encoder&rsquo;s traces around sharp edges, so a frame
+    taken out of the video afterwards is soft, however high the quality. Text
+    and thin lines suffer most.</p>
+  <p>Stills are kept before that happens: the frame exactly as it was on screen,
+    written as a PNG next to the recording. The video stays as it is.</p>
+  <figure>
+    <img class="shot pixels" src="stills-compare.png" width="600" height="236" loading="lazy"
+         alt="The words “Keep lossless stills before a” enlarged four times: blurred and smeared in the frame of the video, crisp in the lossless still">
+    <figcaption>The same moment, enlarged four times: a frame of the video above,
+      the still below.</figcaption>
+  </figure>
+
+  <h2>Four ways to keep stills</h2>
+  <p>All of them work while a recording is running and keep the moment of the
+    region being recorded.</p>
+
+  <div class="ways">
+    <div class="way">
+      <h3>
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+             stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z"/>
+          <circle cx="12" cy="13" r="3"/>
+        </svg>
+        The camera button
+      </h3>
+      <p>The small panel beside the recorded region has a camera button. Each
+        click keeps the frame shown now, and the panel counts them.</p>
+    </div>
+    <div class="way">
+      <h3>A key of your own</h3>
+      <p>Bind <code>guckste still</code> to a key in your desktop&rsquo;s keyboard
+        settings, as you would <code>guckste record</code>. Recording a whole
+        screen has no panel; there the tray menu has <em>Keep a Still</em> as well.</p>
+    </div>
+    <div class="way">
+      <h3>Every click</h3>
+      <p>Turn on <em>Keep lossless stills before and after each click while
+        recording</em> in the settings, and go through the flow as usual.
+        Two stills come with each click.</p>
+    </div>
+    <div class="way">
+      <h3>Every change</h3>
+      <p>Turn on <em>Keep lossless stills of what the screen settles on after
+        it changes</em>. No click needed: a tooltip, a hover highlight or a new
+        page each give a still once they have settled.</p>
+    </div>
+  </div>
+
+  <h2>Stills on every click</h2>
+  <figure>
+    <img class="shot part" src="stills-settings.png" width="560" height="170" loading="lazy"
+         alt="Part of the Guckste settings with “Keep lossless stills before and after each click while recording” checked">
+    <figcaption>In the settings, under the pointer and the keys.</figcaption>
+  </figure>
+  <div>
+      <p>Clicking through a flow already marks its steps: each click leads from
+        one state of the screen to the next. So for each click inside the
+        recorded region, Guckste keeps</p>
+      <ul class="rules">
+        <li><strong>the still before it</strong>, the last frame before the button
+          went down. The pointer is already over what it clicks, so the button&rsquo;s
+          hover state, a highlighted row or an open menu are in it.</li>
+        <li><strong>the still after it</strong>, once the screen has stopped
+          changing: what the click led to, after any animation has played.</li>
+      </ul>
+      <p class="note">The listening is the same as for showing keys: XInput2 on
+        X11, a mouse hook on Windows, an event tap on macOS, which asks for the
+        Accessibility permission. Wayland has no way to listen, so the setting
+        isn&rsquo;t there; the camera button and <code>guckste still</code> work
+        everywhere.</p>
+  </div>
+
+  <h3>When is the screen &ldquo;settled&rdquo;?</h3>
+  <div class="diagram" role="img"
+       aria-label="A timeline of one click: the still before is the frame just before the click; the screen then changes for a while; once it has stayed the same for 0.3 seconds, the still after is kept.">
+    <svg viewBox="0 0 760 190" xmlns="http://www.w3.org/2000/svg">
+      <!-- the frames -->
+      <rect x="20" y="70" width="720" height="36" rx="6" fill="var(--track)"/>
+      <rect x="250" y="70" width="230" height="36" fill="var(--changing)"/>
+      <g stroke="var(--bg)" stroke-width="2">
+        <line x1="60" y1="70" x2="60" y2="106"/><line x1="100" y1="70" x2="100" y2="106"/>
+        <line x1="140" y1="70" x2="140" y2="106"/><line x1="180" y1="70" x2="180" y2="106"/>
+        <line x1="220" y1="70" x2="220" y2="106"/><line x1="250" y1="70" x2="250" y2="106"/>
+        <line x1="290" y1="70" x2="290" y2="106"/><line x1="330" y1="70" x2="330" y2="106"/>
+        <line x1="370" y1="70" x2="370" y2="106"/><line x1="410" y1="70" x2="410" y2="106"/>
+        <line x1="450" y1="70" x2="450" y2="106"/><line x1="480" y1="70" x2="480" y2="106"/>
+        <line x1="520" y1="70" x2="520" y2="106"/><line x1="560" y1="70" x2="560" y2="106"/>
+        <line x1="600" y1="70" x2="600" y2="106"/><line x1="640" y1="70" x2="640" y2="106"/>
+        <line x1="680" y1="70" x2="680" y2="106"/>
+      </g>
+      <text x="365" y="93" text-anchor="middle">the screen changes</text>
+      <text x="30" y="128" class="muted">frames, as recorded</text>
+
+      <!-- the click -->
+      <line x1="250" y1="34" x2="250" y2="112" stroke="var(--accent)" stroke-width="2"/>
+      <path d="M244 14 l0 18 l5 -4.5 l3.5 8 l3 -1.5 l-3.5 -7.5 l6 0 z" fill="var(--fg)" stroke="var(--bg)" stroke-width="1"/>
+      <text x="262" y="30">click</text>
+
+      <!-- the still before -->
+      <rect x="221" y="64" width="29" height="48" rx="3" fill="none" stroke="var(--before)" stroke-width="3"/>
+      <text x="236" y="150" text-anchor="middle">still before</text>
+      <text x="236" y="168" text-anchor="middle" class="muted">hover state</text>
+
+      <!-- settling -->
+      <line x1="480" y1="122" x2="600" y2="122" stroke="var(--muted)" stroke-width="1.5"/>
+      <line x1="480" y1="116" x2="480" y2="128" stroke="var(--muted)" stroke-width="1.5"/>
+      <line x1="600" y1="116" x2="600" y2="128" stroke="var(--muted)" stroke-width="1.5"/>
+      <text x="540" y="142" text-anchor="middle" class="muted">unchanged for 0.3 s</text>
+
+      <!-- the still after -->
+      <rect x="600" y="64" width="40" height="48" rx="3" fill="none" stroke="var(--after)" stroke-width="3"/>
+      <text x="620" y="168" text-anchor="middle">still after</text>
+      <text x="620" y="56" text-anchor="middle" class="muted">what it led to</text>
+    </svg>
+  </div>
+  <ul class="rules">
+    <li>A click that changes nothing within 2 seconds keeps only the still before it.</li>
+    <li>When the screen never settles, as while a video plays, the still after
+      is taken 4 seconds after the click.</li>
+    <li>Clicking again before the screen has settled ends the first click there:
+      what it led to so far is its still after.</li>
+    <li>A still showing the same as the one kept before it is left out, so a
+      double click or a row of clicks on nothing doesn&rsquo;t pile up copies.
+      The camera button and <code>guckste still</code> always keep one.</li>
+    <li>Clicks outside the region, like on the recording panel, don&rsquo;t count.</li>
+  </ul>
+
+  <h2>Stills on every change</h2>
+  <p>Some states come without a click: a tooltip after resting the pointer, a
+    row lighting up under it, a page loading on its own. With this setting on,
+    Guckste compares each frame with what the screen last settled on. When as
+    many pixels as a tooltip covers have changed, it waits
+    until the screen stays the same for 0.3 seconds and keeps that frame, the
+    same way as the still after a click.</p>
+  <ul class="rules">
+    <li>Small changes don&rsquo;t count: a blinking caret or a ticking clock are
+      too few pixels to keep a still, even both at once at opposite corners.
+      Changes add up, though: typing a line gives a still once you pause.</li>
+    <li>An animation is kept once, when it ends. Something that never stops
+      moving, like a playing video, gives a still every 4 seconds.</li>
+    <li>While a click waits for its still after, the click&rsquo;s stills stand for
+      the change it makes; there is no extra one.</li>
+    <li>The pointer is not part of the picture, so moving it around keeps
+      nothing by itself; only what the screen does in response.</li>
+    <li>No listening is needed, so it works on Wayland as well. Both settings
+      can be on together.</li>
+  </ul>
+
+  <h2>Where they go</h2>
+  <p>Every recording gets a folder of its own, so a flow stays together: the
+    video, and its stills beside it, numbered in the order they were kept.</p>
+  <div class="code"><pre>Pictures/Screenshots/
+  guckste_2026-10-23_11-28-46/
+    guckste_2026-10-23_11-28-46.mp4
+    01-before-click.png
+    02-after-click.png
+    03-change.png
+    04-kept.png</pre></div>
+  <p>When a recording opens in the editor first (the default), it waits in a
+    temporary folder while the editor is open. Saving the video puts it into
+    the recording&rsquo;s folder and copies the stills of the part kept beside
+    it; the image button on the toolbar saves the stills alone. Closing the
+    editor without saving deletes the recording and its stills, after asking.</p>
+  <p>Only after the stills? Turn on <em>Keep only the stills of a recording,
+    without the video</em>. Nothing is encoded then, the folder holds just
+    the stills, and stopping opens them in the editor as one picture.</p>
+  <p class="note">The stills are without the pointer. Where it was is kept with
+    them, so the editor can put it back as a layer of its own.</p>
+
+  <h2>Finding them in the editor</h2>
+  <figure>
+    <img class="shot" src="stills-editor.png" width="1400" height="900" loading="lazy"
+         alt="The editor on a recording of the settings window, the playhead on a still after a click on the stills checkbox, with diamonds on the timeline where the stills are">
+    <figcaption>The playhead on the still after the click; the diamond before it
+      is the still before.</figcaption>
+  </figure>
+  <p>Each still is a small diamond on the top edge of the timeline:</p>
+  <div class="legend">
+    <span><i class="diamond" style="background: var(--before)"></i>before a click</span>
+    <span><i class="diamond" style="background: var(--after)"></i>after a click</span>
+    <span><i class="diamond" style="background: var(--change)"></i>after the screen changed</span>
+    <span><i class="diamond" style="background: var(--kept)"></i>kept with the camera button or a key</span>
+  </div>
+  <table>
+    <tr><th>To</th><th>Do</th></tr>
+    <tr><td>Go to a still</td><td>Click the timeline near its diamond: within a few pixels it snaps
+      to it. Hovering shows its time and kind.</td></tr>
+    <tr><td>Step through them</td><td><kbd>Ctrl</kbd>+<kbd>.</kbd> goes to the next,
+      <kbd>Ctrl</kbd>+<kbd>,</kbd> to the one before.</td></tr>
+    <tr><td>See it</td><td>With the playhead on a still the canvas shows the still itself, with the
+      pointer painted in, instead of the video&rsquo;s frame.</td></tr>
+    <tr><td>Open it as an image</td><td>The camera button on the toolbar, or <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>F</kbd>.
+      Its tooltip says &ldquo;Open this lossless still&rdquo; when the playhead is on one.</td></tr>
+    <tr><td>Copy it</td><td><kbd>Ctrl</kbd>+<kbd>C</kbd> copies it, pointer and all.</td></tr>
+  </table>
+  <p>The diamonds belong to their clip: trim its start or move it in time and
+    they go along; trim a still away and its diamond goes too.</p>
+
+  <h2>Opening one</h2>
+  <figure>
+    <img class="shot" src="stills-frame.png" width="1400" height="900" loading="lazy"
+         alt="A new editor with the still as an image and the pointer as a separate, selected layer named Pointer in the layer panel">
+    <figcaption>The still opened as an image: the pointer is a layer of its own.</figcaption>
+  </figure>
+  <p>The still opens in a new editor at its full quality, like any screenshot:
+    draw on it, crop it, combine it with others, copy or save it. The pointer is a
+    separate layer named <em>Pointer</em> above it. Keep it to show where the
+    click went, drag it somewhere else, or delete it for a clean picture. Marks
+    drawn on the video at that moment come along, still editable.</p>
+
+  <h2>The whole flow as one picture</h2>
+  <p>The grid button on the toolbar opens the stills between the
+    timeline&rsquo;s handles in a new editor, in rows of three in the order they
+    were kept, each with its pointer as a layer of its own. Number the steps,
+    draw arrows between them, delete the stills you don&rsquo;t need, and save
+    the flow as one image. Trim the timeline first to pick a part: up to 24
+    stills go into one picture, fewer of a 4K screen.</p>
+  <figure>
+    <img class="shot" src="stills-sheet.png" width="1400" height="900" loading="lazy"
+         alt="A new editor with the still before the click and the still after it side by side, numbered 1 and 2, an arrow from the clicked checkbox to the result, and the layer panel listing each still and its pointer">
+    <figcaption>The click&rsquo;s two stills as one picture, numbered, with an arrow
+      drawn between them.</figcaption>
+  </figure>
+
+  <h2>Good to know</h2>
+  <ul class="rules">
+    <li>For a state that only shows while hovering, a tooltip for example, turn
+      on stills on every change, or rest the pointer there and press your
+      <code>guckste still</code> key.</li>
+    <li>Stills show what was on screen. The keys shown along the bottom of a
+      recording are left out of them, and so are the red frame and the panel,
+      which are outside the region.</li>
+    <li>A pause stops the stills too; their times are the video&rsquo;s, without
+      the pause.</li>
+  </ul>
+
+  <footer>
+    <a href="./">Back to Guckste</a> &middot;
+    <a href="https://github.com/iam-peter/guckste">github.com/iam-peter/guckste</a>
+  </footer>
+</main>
+</body>
+</html>

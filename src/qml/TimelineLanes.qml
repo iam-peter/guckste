@@ -333,9 +333,11 @@ ListView {
             }
             onDoubleClicked: lanes.seekRequested(lane.startMs)
 
-            ToolTip.visible: mode !== ""
-            ToolTip.text: `${lanes.timeline.time(lane.startMs)} – ${lanes.timeline.time(lane.shownEnd)}`
-                          + (lanes.chosen.length > 1 ? qsTr(" (%1 marks)").arg(lanes.chosen.length) : "")
+            Tip {
+                visible: drag.mode !== ""
+                text: `${lanes.timeline.time(lane.startMs)} – ${lanes.timeline.time(lane.shownEnd)}`
+                      + (lanes.chosen.length > 1 ? qsTr(" (%1 marks)").arg(lanes.chosen.length) : "")
+            }
         }
 
         // For every selected lane.

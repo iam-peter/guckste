@@ -6,6 +6,7 @@
 #include "core/KeyListener.h"
 #include "core/KeyOverlay.h"
 #include "core/ScreenRecorder.h"
+#include "core/StillKeeper.h"
 #include "core/VideoExporter.h"
 #include "core/VideoFrames.h"
 #include "core/WindowFinder.h"
@@ -153,6 +154,8 @@ private slots:
         QTRY_VERIFY_WITH_TIMEOUT(!recorder.starting(), ScreenRecorder::warmUpMs + 500);
         QVERIFY(recorder.canPause());
         QTest::qWait(1500);
+        recorder.keepStill();
+        QCOMPARE(recorder.stillCount(), 1);
         recorder.pause();
         QCOMPARE(recorder.state(), ScreenRecorder::Paused);
         QTest::qWait(500);
@@ -169,7 +172,198 @@ private slots:
         QVERIFY(!recorder.firstFrame().isNull());
         QCOMPARE(recorder.firstFrame().size(), QSize(640, 360));
         recorder.firstFrame().save(QFileInfo(path).absolutePath() + u"/live-first.png"_s);
+        // Written beside the recording, lossless, at its time in it.
+        const Still still = recorder.stills().value(0);
+        QCOMPARE(QFileInfo(still.path).absolutePath(), ScreenRecorder::stillsDirectory(path));
+        QCOMPARE(QImage(still.path).size(), QSize(640, 360));
+        QVERIFY2(still.ms > 1000 && still.ms < 2000, qPrintable(QString::number(still.ms)));
         qInfo("Recorded %lld ms to %s (%lld bytes)", recorder.duration(), qPrintable(path), QFileInfo(path).size());
+
+        // Stills only: no video, the stills in the folder all the same.
+        const QString stillsPath = QFileInfo(path).absolutePath() + u"/only/only.mp4"_s;
+        QSignalSpy stillsFinished(&recorder, &ScreenRecorder::stillsFinished);
+        ScreenRecorder::Options only;
+        only.video = false;
+        QVERIFY(recorder.start(QRect(100, 100, 320, 200), stillsPath, only));
+        QTRY_VERIFY_WITH_TIMEOUT(!recorder.starting(), ScreenRecorder::warmUpMs + 500);
+        QTest::qWait(800);
+        recorder.keepStill();
+        QVERIFY(recorder.duration() > 500);
+        recorder.stop();
+        QTRY_COMPARE_WITH_TIMEOUT(recorder.state(), ScreenRecorder::Idle, 5000);
+        QCOMPARE(stillsFinished.count(), 1);
+        QVERIFY(!QFileInfo::exists(stillsPath));
+        QCOMPARE(QImage(recorder.stills().value(0).path).size(), QSize(320, 200));
+    }
+
+    static StillKeeper::Frame screen(const QColor &color, int ms)
+    {
+        StillKeeper::Frame frame;
+        frame.image = QImage(16, 10, QImage::Format_RGB32);
+        frame.image.fill(color);
+        frame.ms = ms;
+        return frame;
+    }
+
+    static QList<Still::Kind> kindsOf(const QList<Still> &stills)
+    {
+        QList<Still::Kind> kinds;
+        for (const Still &still : stills)
+            kinds << still.kind;
+        return kinds;
+    }
+
+    // Around a click, the screen before it, and after it once the screen
+    // settles; nothing after a click that changes nothing, and no picture
+    // twice in a row unless asked for.
+    void keepsStillsAroundClicks()
+    {
+        using enum Still::Kind;
+        QTemporaryDir dir;
+        StillKeeper keeper;
+        keeper.begin(dir.filePath(u"rec stills"_s));
+        keeper.press();
+        QVERIFY(keeper.stills().isEmpty());
+
+        int ms = 0;
+        const auto run = [&](const QColor &color, int until) {
+            for (; ms <= until; ms += 33)
+                keeper.frame(screen(color, ms));
+        };
+        run(Qt::white, 99);
+        StillKeeper::Frame hovered = screen(Qt::gray, ms);
+        hovered.pointer = QImage(2, 2, QImage::Format_ARGB32_Premultiplied);
+        hovered.pointerRect = QRectF(3, 4, 2, 2);
+        keeper.frame(hovered);
+        ms += 33;
+        keeper.press();
+        // An animation, then the result.
+        run(Qt::darkGray, 300);
+        run(Qt::black, 500);
+        QCOMPARE(kindsOf(keeper.stills()), QList({BeforeClick}));
+        run(Qt::black, 900);
+        QCOMPARE(kindsOf(keeper.stills()), QList({BeforeClick, AfterClick}));
+        QCOMPARE(keeper.stills()[0].ms, 132);
+        QCOMPARE(keeper.stills()[0].pointerRect, QRectF(3, 4, 2, 2));
+        QVERIFY(keeper.stills()[1].ms >= 330 + StillKeeper::settleMs);
+
+        // Nothing changes: no still after, and none of the same before.
+        keeper.press();
+        run(Qt::black, 900 + StillKeeper::waitForChangeMs + 100);
+        QCOMPARE(keeper.stills().size(), 2);
+        // Asked for, it is kept all the same.
+        keeper.keep();
+        QCOMPARE(kindsOf(keeper.stills()), QList({BeforeClick, AfterClick, Kept}));
+
+        // Clicked again while the screen still changes: what the first
+        // click did so far ends it.
+        keeper.press();
+        run(Qt::red, ms + 100);
+        keeper.press();
+        QCOMPARE(kindsOf(keeper.stills()).mid(3), QList({AfterClick}));
+        // A screen that never settles, as a video playing.
+        for (int i = 0; ms <= 4000 + StillKeeper::maxWaitMs; ms += 33, ++i)
+            keeper.frame(screen(i % 2 ? Qt::blue : Qt::green, ms));
+        QCOMPARE(kindsOf(keeper.stills()).mid(3), QList({AfterClick, AfterClick}));
+        // One left waiting when the recording stops.
+        run(Qt::cyan, ms + 50);
+        keeper.press();
+        run(Qt::yellow, ms + 50);
+        keeper.finish();
+        QCOMPARE(kindsOf(keeper.stills()).mid(3), QList({AfterClick, AfterClick, BeforeClick, AfterClick}));
+
+        // Written out as they were.
+        QCOMPARE(QFileInfo(keeper.stills()[0].path).fileName(), u"01-before-click.png"_s);
+        QCOMPARE(QFileInfo(keeper.stills()[2].path).fileName(), u"03-kept.png"_s);
+        QCOMPARE(QImage(keeper.stills()[0].path).pixelColor(1, 1), QColor(Qt::gray));
+        QCOMPARE(QImage(keeper.stills()[1].path).pixelColor(1, 1), QColor(Qt::black));
+        QCOMPARE(QImage(keeper.stills().last().path).pixelColor(1, 1), QColor(Qt::yellow));
+        // Beside the recording, in its folder.
+        QCOMPARE(ScreenRecorder::stillsDirectory(u"/a/Recording 1/Recording 1.mp4"_s), u"/a/Recording 1"_s);
+    }
+
+    // Without a click: what the screen settles on after a change as big
+    // as a tooltip, but not a blinking caret, once for a change that
+    // animates, every few seconds for one that never stops, and nothing
+    // of its own while a click waits.
+    void keepsStillsOfChanges()
+    {
+        using enum Still::Kind;
+        QTemporaryDir dir;
+        StillKeeper keeper;
+        keeper.setKeepChanges(true);
+        keeper.begin(dir.filePath(u"rec stills"_s));
+        QImage page(200, 100, QImage::Format_RGB32);
+        page.fill(Qt::white);
+        int ms = 0;
+        const auto show = [&](const QImage &image, int forMs) {
+            for (const int until = ms + forMs; ms < until; ms += 33) {
+                StillKeeper::Frame frame;
+                frame.image = image;
+                frame.ms = ms;
+                keeper.frame(frame);
+            }
+        };
+        const auto with = [&](QRect rect, const QColor &color) {
+            QImage image = page;
+            QPainter(&image).fillRect(rect, color);
+            return image;
+        };
+
+        // A caret blinking: nothing, even with a clock ticking far away.
+        for (int i = 0; i < 6; ++i) {
+            QImage image = i % 2 ? with(QRect(20, 20, 2, 14), Qt::black) : page;
+            QPainter(&image).fillRect(QRect(180, 85 - i, 9, 1), Qt::black);
+            show(image, 530);
+        }
+        QVERIFY(keeper.stills().isEmpty());
+        show(page, 400);
+
+        // A tooltip fading in, then shown: one still, once it is all there.
+        const QRect tooltip(60, 40, 80, 24);
+        show(with(tooltip, QColor(0xe0, 0xe0, 0xe0)), 66);
+        show(with(tooltip, QColor(0x80, 0x80, 0x80)), 66);
+        const int whole = ms;
+        show(with(tooltip, Qt::black), 1000);
+        QCOMPARE(kindsOf(keeper.stills()), QList({Change}));
+        QVERIFY(keeper.stills()[0].ms >= whole + StillKeeper::settleMs);
+        QVERIFY(keeper.stills()[0].ms < whole + StillKeeper::settleMs + 33);
+        keeper.finish();
+        QCOMPARE(QImage(keeper.stills()[0].path).pixelColor(tooltip.center()), QColor(Qt::black));
+
+        // Gone again: the page as it was, a state of its own.
+        show(page, 1000);
+        QCOMPARE(kindsOf(keeper.stills()), QList({Change, Change}));
+
+        // Never settling, as a video playing: one every few seconds.
+        for (int i = 0; i < 270; ++i)
+            show(with(QRect(0, 0, 100, 100), QColor::fromHsv(i, 255, 255)), 33);
+        QCOMPARE(kindsOf(keeper.stills()).size(), 4);
+        show(page, 1000);
+        QCOMPARE(kindsOf(keeper.stills()).size(), 5);
+
+        // A click: its own still after it, none for the change it makes;
+        // the one before it is the page just kept.
+        keeper.press();
+        show(with(QRect(10, 10, 120, 60), Qt::green), 1000);
+        QCOMPARE(kindsOf(keeper.stills()).mid(5), QList({AfterClick}));
+        show(with(QRect(10, 10, 120, 60), Qt::green), 1000);
+        QCOMPARE(kindsOf(keeper.stills()).size(), 6);
+        QCOMPARE(QFileInfo(keeper.stills()[0].path).fileName(), u"01-change.png"_s);
+
+        // Off: nothing without a click.
+        StillKeeper quiet;
+        quiet.begin(dir.filePath(u"quiet stills"_s));
+        StillKeeper::Frame frame;
+        frame.image = page;
+        quiet.frame(frame);
+        frame.image = with(tooltip, Qt::black);
+        for (frame.ms = 33; frame.ms < 1000; frame.ms += 33)
+            quiet.frame(frame);
+        QVERIFY(quiet.stills().isEmpty());
+
+        QCOMPARE(StillKeeper::changedPixels(page, with(QRect(5, 6, 7, 8), Qt::red)), 56);
+        QCOMPARE(StillKeeper::changedPixels(page, page), 0);
     }
 
     void oneInstanceAtATime()

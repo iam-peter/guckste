@@ -59,7 +59,9 @@ jobs:
       - name: Start page
         run: |
           mkdir site
-          cp pages/index.html src/logo/guckste.svg docs/screenshots/editor.png docs/screenshots/overlay.png docs/screenshots/measure.png site/
+          cp pages/index.html pages/stills.html src/logo/guckste.svg site/
+          cp docs/screenshots/editor.png docs/screenshots/overlay.png docs/screenshots/measure.png site/
+          cp docs/screenshots/stills-*.png site/
 
       - name: Repository
         env:

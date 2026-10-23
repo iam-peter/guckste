@@ -36,6 +36,9 @@ class Preferences : public QObject
     Q_PROPERTY(bool includeCursor READ includeCursor WRITE setIncludeCursor NOTIFY changed)
     Q_PROPERTY(bool showKeys READ showKeys WRITE setShowKeys NOTIFY changed)
     Q_PROPERTY(bool showKeysSupported READ showKeysSupported CONSTANT)
+    Q_PROPERTY(bool stillsOnClicks READ stillsOnClicks WRITE setStillsOnClicks NOTIFY changed)
+    Q_PROPERTY(bool stillsOnChanges READ stillsOnChanges WRITE setStillsOnChanges NOTIFY changed)
+    Q_PROPERTY(bool stillsOnly READ stillsOnly WRITE setStillsOnly NOTIFY changed)
     Q_PROPERTY(QRect lastRegion READ lastRegion WRITE setLastRegion NOTIFY changed)
     Q_PROPERTY(QString pickMode READ pickMode WRITE setPickMode NOTIFY changed)
 
@@ -81,7 +84,17 @@ public:
     // Keys pressed, shown along the bottom of recordings.
     bool showKeys() const;
     void setShowKeys(bool on);
+    // Also whether clicks can be listened to, by the same listener.
     bool showKeysSupported() const;
+    // A lossless still before and after each click while recording.
+    bool stillsOnClicks() const;
+    void setStillsOnClicks(bool on);
+    // A lossless still of what the screen settles on after it changes.
+    bool stillsOnChanges() const;
+    void setStillsOnChanges(bool on);
+    // Recordings keep their stills only, no video.
+    bool stillsOnly() const;
+    void setStillsOnly(bool on);
     // The region last captured or recorded, in screen coordinates, offered
     // again next time.
     QRect lastRegion() const;
@@ -92,8 +105,18 @@ public:
 
     // Where the next screenshot goes: the directory, the pattern, .png.
     Q_INVOKABLE QString nextSavePath() const;
-    // The same for a recording, with the video format's suffix.
+    // Where the next recording goes: a folder of its own in the
+    // directory, named by the pattern, the video in it by the same name
+    // and the format's suffix. Its stills go beside it, so the folder
+    // holds the whole flow.
     Q_INVOKABLE QString nextRecordingPath(const QString &suffix) const;
+    // A recording's folder in the directory, by its name.
+    Q_INVOKABLE QString recordingFolder(const QString &name) const;
+    // Where a recording's video is saved again from the editor: in its
+    // folder, under its name, numbered when that is taken.
+    Q_INVOKABLE QString recordingVideoPath(const QString &name, const QString &suffix) const;
+    // Where another video is saved: in the directory, by the pattern.
+    Q_INVOKABLE QString nextVideoPath(const QString &suffix) const;
     Q_INVOKABLE QString previewFileName(const QString &pattern) const;
 
 signals:

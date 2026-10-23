@@ -23,6 +23,9 @@ ApplicationWindow {
     // A recording not saved anywhere yet: deleted when the window closes,
     // unless saving moved it into place.
     property string temporaryVideo: ""
+    // A recording's name: its folder in the screenshot folder, where its
+    // video and stills are saved together.
+    property string recordingName: ""
     property bool saved: false
     readonly property bool videoMode: document.hasVideo
     // The part of the time a video is saved from.
@@ -30,6 +33,11 @@ ApplicationWindow {
     property int trimEnd: -1
     readonly property int effectiveEnd: trimEnd < 0 ? playback.duration : Math.min(trimEnd, playback.duration)
     readonly property bool unsaved: document.modified || (temporaryVideo !== "" && !saved)
+    // The stills of the part kept.
+    readonly property int keptStills: videoMode && document.revision >= 0
+                                      ? document.stillCount(trimStart, effectiveEnd) : 0
+    // The playhead is on a lossless still of a recording.
+    readonly property bool atStill: document.revision >= 0 && document.time >= 0 && document.stillShown()
 
     readonly property list<real> zoomLevels: [0.25, 0.5, 0.75, 1, 1.5, 2, 3, 4, 6, 8, 12, 16, 24, 32]
     property real zoom: 1
@@ -159,6 +167,15 @@ ApplicationWindow {
         playback.position = ms
     }
 
+    // Seeks to the next still after the playhead, or the last before it.
+    function stepStill(direction: int) {
+        const times = timeline.stills.map(s => s.time)
+        const next = direction > 0 ? times.find(t => t > playback.position)
+                                   : times.reverse().find(t => t < playback.position)
+        if (next !== undefined)
+            seek(next)
+    }
+
     function stepFrame(frames: int) {
         seek(playback.position + Math.round(frames * 1000 / Math.max(1, playback.frameRate)))
     }
@@ -168,6 +185,20 @@ ApplicationWindow {
         marks.commitText()
         playback.pause()
         App.openFrame(document)
+    }
+
+    // Where Save puts the video: a recording into its folder.
+    function videoTarget(): string {
+        return recordingName !== "" ? Preferences.recordingVideoPath(recordingName, App.recordingSuffix())
+                                    : Preferences.nextVideoPath(App.recordingSuffix())
+    }
+
+    // The stills of the part kept, into the recording's folder.
+    function saveStills() {
+        const folder = recordingName !== "" ? Preferences.recordingFolder(recordingName)
+                                            : Preferences.saveDirectory
+        const saved = document.saveStills(folder, trimStart, effectiveEnd)
+        status.flash(qsTr("Saved %n still(s) to %1", "", saved).arg(folder))
     }
 
     function saveVideo(path: string) {
@@ -201,7 +232,7 @@ ApplicationWindow {
         marks.commitText()
         if (videoMode) {
             rememberTools()
-            saveVideo(Preferences.nextRecordingPath(App.recordingSuffix()))
+            saveVideo(videoTarget())
             return
         }
         if (document.filePath !== "" && exportScale === 1) {
@@ -316,6 +347,9 @@ ApplicationWindow {
             }
             root.saved = true
             root.document.markSaved()
+            // The stills go along, so the flow stays together.
+            if (root.recordingName !== "")
+                root.document.saveStills(path.substring(0, path.lastIndexOf("/")), root.trimStart, root.effectiveEnd)
             status.flash(qsTr("Saved %1").arg(path))
             if (Preferences.copyPathAfterSave)
                 Clipboard.setText(path)
@@ -386,13 +420,13 @@ ApplicationWindow {
         ToolSeparator {}
         IconButton { iconName: "zoom-out"; tip: qsTr("Zoom out (Ctrl+-)"); onClicked: root.zoomStep(-1) }
         ToolButton {
+            id: zoomButton
             text: `${Math.round(root.zoom * 100)} %`
             font.pixelSize: 12
             implicitWidth: 56
             focusPolicy: Qt.NoFocus
             onClicked: zoomMenu.open()
-            ToolTip.text: qsTr("Zoom")
-            ToolTip.visible: hovered
+            Tip { text: qsTr("Zoom"); visible: zoomButton.hovered }
             Menu {
                 id: zoomMenu
                 y: parent.height
@@ -409,12 +443,12 @@ ApplicationWindow {
         IconButton { iconName: "zoom-in"; tip: qsTr("Zoom in (Ctrl++)"); onClicked: root.zoomStep(1) }
         IconButton { iconName: "maximize"; tip: qsTr("Fit (Ctrl+0)"); onClicked: root.zoomToFit() }
         ToolButton {
+            id: actualSizeButton
             text: "1:1"
             font.pixelSize: 12
             focusPolicy: Qt.NoFocus
             onClicked: root.zoomAt(1, flick.width / 2, flick.height / 2)
-            ToolTip.text: qsTr("Actual size (Ctrl+1)")
-            ToolTip.visible: hovered
+            Tip { text: qsTr("Actual size (Ctrl+1)"); visible: actualSizeButton.hovered }
         }
         IconButton {
             iconName: "grid-3x3"
@@ -428,8 +462,26 @@ ApplicationWindow {
             objectName: "frameButton"
             property bool available: root.videoMode
             iconName: "camera"
-            tip: qsTr("Open this frame as an image (Ctrl+Shift+F)")
+            tip: root.atStill ? qsTr("Open this lossless still as an image (Ctrl+Shift+F)")
+                              : qsTr("Open this frame as an image (Ctrl+Shift+F)")
             onClicked: root.takeFrame()
+        }
+        IconButton {
+            objectName: "stillsSheetButton"
+            property bool available: root.keptStills > 0
+            iconName: "layout-grid"
+            tip: qsTr("Open the stills of the part kept as one image")
+            onClicked: {
+                playback.pause()
+                App.openStills(root.document, root.trimStart, root.effectiveEnd)
+            }
+        }
+        IconButton {
+            objectName: "saveStillsButton"
+            property bool available: root.keptStills > 0
+            iconName: "image"
+            tip: qsTr("Save the %n still(s) of the part kept to the recording's folder", "", root.keptStills)
+            onClicked: root.saveStills()
         }
         IconButton {
             iconName: "copy"
@@ -720,6 +772,7 @@ ApplicationWindow {
                         position: playback.position
                         trimStart: root.trimStart
                         trimEnd: root.trimEnd
+                        stills: root.document.revision >= 0 ? root.document.stillMarks() : []
                         onSeekRequested: ms => root.seek(ms)
                         onTrimStartRequested: ms => root.trimStart = ms
                         onTrimEndRequested: ms => root.trimEnd = ms
@@ -824,30 +877,36 @@ ApplicationWindow {
                 onClicked: exporter.cancel()
             }
             CheckBox {
+                id: snapBox
                 text: qsTr("Snap to guides")
                 font.pixelSize: 12
                 checked: root.snapToGuides
                 onToggled: root.snapToGuides = checked
-                ToolTip.text: qsTr("Line up what is drawn, moved or resized with the guides dragged out of the rulers")
-                ToolTip.visible: hovered
+                Tip {
+                    text: qsTr("Line up what is drawn, moved or resized with the guides dragged out of the rulers")
+                    visible: snapBox.hovered
+                }
             }
             CheckBox {
+                id: exportGuidesBox
                 visible: !root.videoMode
                 text: qsTr("Export guides")
                 font.pixelSize: 12
                 checked: root.exportGuides
                 onToggled: root.exportGuides = checked
-                ToolTip.text: qsTr("Draw the guides into copies and saved images")
-                ToolTip.visible: hovered
+                Tip { text: qsTr("Draw the guides into copies and saved images"); visible: exportGuidesBox.hovered }
             }
             CheckBox {
+                id: exportAtZoomBox
                 visible: !root.videoMode
                 text: qsTr("Export at %1 %").arg(Math.round(root.zoom * 100))
                 font.pixelSize: 12
                 checked: root.exportAtZoom
                 onToggled: root.exportAtZoom = checked
-                ToolTip.text: qsTr("Copy and save the image enlarged as on screen; off for its own size")
-                ToolTip.visible: hovered
+                Tip {
+                    text: qsTr("Copy and save the image enlarged as on screen; off for its own size")
+                    visible: exportAtZoomBox.hovered
+                }
             }
         }
     }
@@ -901,7 +960,7 @@ ApplicationWindow {
         nameFilters: [qsTr("Video (*.%1)").arg(App.recordingSuffix())]
         defaultSuffix: App.recordingSuffix()
         currentFolder: "file://" + Preferences.saveDirectory
-        selectedFile: "file://" + Preferences.nextRecordingPath(App.recordingSuffix())
+        selectedFile: "file://" + root.videoTarget()
         onAccepted: root.saveVideo(selectedFile.toString().replace(/^file:\/\//, ""))
     }
 
@@ -948,6 +1007,8 @@ ApplicationWindow {
     Shortcut { sequence: "Space"; enabled: root.videoMode && !marks.editingText; onActivated: root.togglePlay() }
     Shortcut { sequence: ","; enabled: root.videoMode && !marks.editingText; onActivated: root.stepFrame(-1) }
     Shortcut { sequence: "."; enabled: root.videoMode && !marks.editingText; onActivated: root.stepFrame(1) }
+    Shortcut { sequence: "Ctrl+,"; enabled: root.videoMode && !marks.editingText; onActivated: root.stepStill(-1) }
+    Shortcut { sequence: "Ctrl+."; enabled: root.videoMode && !marks.editingText; onActivated: root.stepStill(1) }
     Shortcut { sequence: "Home"; enabled: root.videoMode && !marks.editingText; onActivated: root.seek(root.trimStart) }
     Shortcut { sequence: "End"; enabled: root.videoMode && !marks.editingText; onActivated: root.seek(root.effectiveEnd) }
     Shortcut {

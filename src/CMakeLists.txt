@@ -14,6 +14,7 @@ qt_add_qml_module(guckste_core
         core/SingleInstance.h core/SingleInstance.cpp
         core/Preferences.h core/Preferences.cpp
         core/ScreenRecorder.h core/ScreenRecorder.cpp
+        core/StillKeeper.h core/StillKeeper.cpp
         core/Encoding.h core/Encoding.cpp
         core/VideoFrames.h core/VideoFrames.cpp
         core/VideoProbe.h core/VideoProbe.cpp
@@ -104,6 +105,7 @@ qt_add_qml_module(guckste_qml
         qml/Icons.qml
         qml/Icon.qml
         qml/IconButton.qml
+        qml/Tip.qml
         qml/Theme.qml
     RESOURCES
         icons/image-plus.svg

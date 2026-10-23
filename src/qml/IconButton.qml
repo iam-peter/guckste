@@ -8,6 +8,8 @@ ToolButton {
 
     property string iconName
     property string tip
+    // The tooltip under the button instead of over it.
+    property bool tipBelow: false
 
     icon.source: iconName !== "" ? Icons.source(iconName) : ""
     icon.color: palette.buttonText
@@ -15,7 +17,11 @@ ToolButton {
     icon.height: 16
     display: text === "" ? AbstractButton.IconOnly : AbstractButton.TextBesideIcon
     focusPolicy: Qt.NoFocus
-    ToolTip.text: tip
-    ToolTip.visible: tip !== "" && hovered
-    ToolTip.delay: 600
+
+    Tip {
+        text: button.tip
+        visible: button.tip !== "" && button.hovered
+        delay: 600
+        below: button.tipBelow
+    }
 }

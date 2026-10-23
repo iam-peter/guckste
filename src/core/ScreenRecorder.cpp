@@ -4,6 +4,8 @@
 #include "Encoding.h"
 #include "VideoFrames.h"
 
+#include <QCursor>
+#include <QDir>
 #include <QEventLoop>
 #include <QFile>
 #include <QFileInfo>
@@ -115,27 +117,35 @@ bool ScreenRecorder::start(const QRect &region, const QString &path, const Optio
     m_firstFrame = QImage();
     m_keys.clear();
     emit recentKeysChanged();
+    m_stills.setKeepChanges(options.stillsOnChanges, screen ? screen->devicePixelRatio() : 1);
+    m_stills.begin(stillsDirectory(path));
+    emit stillsChanged();
 
     if (!startCapture(screen))
         return false;
 
-    if (options.microphone) {
+    m_stillsMs = 0;
+    if (options.microphone && options.video) {
         m_audio = std::make_unique<QAudioInput>();
         m_encodeSession.setAudioInput(m_audio.get());
     } else {
         m_encodeSession.setAudioInput(nullptr);
         m_audio.reset();
     }
-    if (options.showKeys && KeyListener::supported()) {
+    if ((options.showKeys || options.stillsOnClicks) && KeyListener::supported()) {
         m_keyListener = std::make_unique<KeyListener>();
-        connect(m_keyListener.get(), &KeyListener::keyPressed, this, [this](const QString &label) {
-            m_keys.add(label);
-            emit recentKeysChanged();
-        });
+        if (options.showKeys) {
+            connect(m_keyListener.get(), &KeyListener::keyPressed, this, [this](const QString &label) {
+                m_keys.add(label);
+                emit recentKeysChanged();
+            });
+        }
+        m_keyListener->setListenToButtons(options.stillsOnClicks);
+        connect(m_keyListener.get(), &KeyListener::buttonPressed, this, &ScreenRecorder::onButtonPressed);
         if (!m_keyListener->begin()) {
             m_keyListener.reset();
             const QString why = KeyListener::requirement();
-            emit notice(why.isEmpty() ? tr("The keys pressed cannot be listened to here.") : why);
+            emit notice(why.isEmpty() ? tr("The keys and clicks cannot be listened to here.") : why);
         }
     }
     emit outputPathChanged();
@@ -149,6 +159,8 @@ bool ScreenRecorder::start(const QRect &region, const QString &path, const Optio
     m_recorder.setVideoResolution(size);
     Encoding::apply(m_recorder, size, options.frameRate, options.quality);
     m_recorder.setOutputLocation(QUrl::fromLocalFile(path));
+    if (!options.video)
+        QDir().mkpath(QFileInfo(path).absolutePath());
 
     setState(Recording);
     m_startTime = -1;
@@ -167,7 +179,7 @@ void ScreenRecorder::beginEncoding()
     emit startingChanged();
     // canPause() changes with it.
     emit outputPathChanged();
-    if (m_state != Recording)
+    if (m_state != Recording || !m_options.video)
         return;
     m_recorder.record();
     if (m_failed)
@@ -192,11 +204,41 @@ void ScreenRecorder::onFrame(const QVideoFrame &frame)
     // Cropped, the pointer and the keys painted in, and converted: see
     // VideoFrames.
     QImage image = VideoFrames::toImage(frame, m_cropDevice);
+    if (image.format() != QImage::Format_RGB32 && image.format() != QImage::Format_ARGB32_Premultiplied)
+        image = image.convertToFormat(QImage::Format_RGB32);
+    const CursorCapture::Cursor cursor = m_options.includeCursor ? CursorCapture::current() : CursorCapture::Cursor();
+    if (m_startTime < 0)
+        m_startTime = qMax<qint64>(0, frame.startTime());
+    {
+        // As it is before anything is painted in, and as big as the
+        // video, which has even sizes.
+        StillKeeper::Frame still;
+        const bool even = image.width() % 2 == 0 && image.height() % 2 == 0;
+        still.image = even ? image : image.copy(0, 0, image.width() & ~1, image.height() & ~1);
+        const qint64 us = frame.startTime() >= 0 ? frame.startTime() - m_startTime - m_pausedTotal : 0;
+        // Rounded up: a frame shows from its start on.
+        still.ms = int((qMax<qint64>(0, us) + 999) / 1000);
+        if (cursor.ok && !cursor.image.isNull()) {
+            const qreal scale = m_devicePixelRatio / cursor.imageDevicePixelRatio;
+            const QPointF at = QPointF(cursor.position - m_region.topLeft()) * m_devicePixelRatio
+                               - QPointF(cursor.hotspot) * scale;
+            still.pointer = cursor.image;
+            still.pointerRect = QRectF(at, QSizeF(cursor.image.size()) * scale);
+        }
+        const auto before = m_stills.stills().size();
+        m_stills.frame(still);
+        if (m_stills.stills().size() != before)
+            emit stillsChanged();
+        if (!m_options.video) {
+            if (still.ms / 1000 != m_stillsMs / 1000)
+                emit durationChanged();
+            m_stillsMs = still.ms;
+            return;
+        }
+    }
     if (m_options.includeCursor || !m_keys.isEmpty()) {
-        if (image.format() != QImage::Format_RGB32 && image.format() != QImage::Format_ARGB32_Premultiplied)
-            image = image.convertToFormat(QImage::Format_RGB32);
         if (m_options.includeCursor)
-            CursorCapture::paint(image, m_region, m_devicePixelRatio);
+            CursorCapture::paint(image, m_region, m_devicePixelRatio, cursor);
         if (!m_keys.isEmpty()) {
             QPainter painter(&image);
             m_keys.paint(painter, image.rect());
@@ -207,8 +249,6 @@ void ScreenRecorder::onFrame(const QVideoFrame &frame)
     QVideoFrame out = VideoFrames::toNV12(image);
     if (!out.isValid())
         return;
-    if (m_startTime < 0)
-        m_startTime = qMax<qint64>(0, frame.startTime());
     out.setStartTime(frame.startTime() >= 0 ? frame.startTime() - m_startTime : -1);
     out.setEndTime(frame.endTime() >= 0 ? frame.endTime() - m_startTime : -1);
     if (m_pausedTotal > 0) {
@@ -257,6 +297,31 @@ void ScreenRecorder::stop()
         m_recorder.stop();
 }
 
+void ScreenRecorder::keepStill()
+{
+    if (m_state != Recording || m_starting)
+        return;
+    m_stills.keep();
+    emit stillsChanged();
+}
+
+void ScreenRecorder::onButtonPressed()
+{
+    // Clicks on anything outside, like the recording's own panel, are not
+    // part of it.
+    if (m_state != Recording || m_starting || !m_region.contains(QCursor::pos()))
+        return;
+    const auto before = m_stills.stills().size();
+    m_stills.press();
+    if (m_stills.stills().size() != before)
+        emit stillsChanged();
+}
+
+QString ScreenRecorder::stillsDirectory(const QString &recording)
+{
+    return QFileInfo(recording).absolutePath();
+}
+
 QStringList ScreenRecorder::recentKeys() const
 {
     return m_keys.labels();
@@ -272,12 +337,28 @@ void ScreenRecorder::finish()
     }
     m_encodeSession.setAudioInput(nullptr);
     m_audio.reset();
+    m_stills.finish();
+    emit stillsChanged();
+    setState(Idle);
+    if (!m_options.video) {
+        if (m_stills.stills().isEmpty()) {
+            QDir().rmdir(m_stills.directory());
+            emit errorOccurred(tr("No stills were kept"));
+            return;
+        }
+        emit stillsFinished(m_stills.directory());
+        return;
+    }
     const QString path = m_recorder.actualLocation().isLocalFile() ? m_recorder.actualLocation().toLocalFile()
                                                                     : m_outputPath;
-    setState(Idle);
     if (m_failed || QFileInfo(path).size() == 0) {
-        // Nothing worth keeping.
+        // No video worth keeping; the stills are whole all the same.
         QFile::remove(path);
+        if (!m_stills.stills().isEmpty()) {
+            emit stillsFinished(m_stills.directory());
+            return;
+        }
+        QDir().rmdir(m_stills.directory());
         if (!m_failed)
             emit errorOccurred(tr("Nothing was recorded"));
         return;

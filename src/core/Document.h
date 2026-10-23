@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Annotation.h"
+#include "StillKeeper.h"
 #include "VideoProbe.h"
 
 #include <QColor>
@@ -115,11 +116,34 @@ public:
     Q_INVOKABLE void addVideoFile(const QString &path, bool after);
     void setClipFrame(int clip, const QVideoFrame &frame);
     void setClipImage(int clip, const QImage &image);
-    // What a clip shows now: its latest frame, or the one it was added with.
+    // What a clip shows now: its still when there is one at the time, its
+    // latest frame, or the one it was added with.
     QImage clipImage(const Annotation &clip) const;
     // A new document with what is shown now, every clip as an image of
     // its frame and all of it shown all the time: a still to go on with.
+    // A clip's still is taken as it is, the pointer a layer above it.
     Document *frameDocument() const;
+    // The lossless stills of a video, from its recording.
+    void addStills(const QString &source, const QList<Still> &stills);
+    // The stills the clips show, in the document's time: {time, kind},
+    // kind "kept", "before" or "after" a click, or "change"; ordered by
+    // time.
+    Q_INVOKABLE QVariantList stillMarks() const;
+    // Whether a clip shows a still at the document's time.
+    Q_INVOKABLE bool stillShown() const;
+    // The stills from `fromMs` to `toMs` of the document's time (-1: to
+    // the end): how many; copied into a folder, file names kept unless
+    // another file has one; and as one new document, each an image with
+    // its pointer above it, in rows, the first of them as many as fit
+    // maxStillsInOne and maxPixelsInOne, how many in `taken`.
+    Q_INVOKABLE int stillCount(int fromMs, int toMs) const;
+    Q_INVOKABLE int saveStills(const QString &directory, int fromMs, int toMs) const;
+    static constexpr int maxStillsInOne = 24;
+    // Six 4K stills, two dozen of 1080p.
+    static constexpr qint64 maxPixelsInOne = 50'000'000;
+    Document *stillsDocument(int fromMs, int toMs, int *taken = nullptr) const;
+    // The same for stills at the given times.
+    static Document *sheetOf(QList<std::pair<int, Still>> stills, int *taken = nullptr);
     // Replaces every layer, as for an exporter's copy; no undo step.
     void setLayers(const QList<Annotation> &layers);
     // Written out as a video: nothing left unsaved.
@@ -258,6 +282,11 @@ private:
     void snapImage(int index);
     // Sets a mark's time; a clip's from how it was before, `before`.
     void applyTiming(int index, int startMs, int endMs);
+    // The still a clip shows at the document's time, if any.
+    const Still *stillOf(const Annotation &clip) const;
+    // The stills the clips show from `fromMs` to `toMs`, with their time,
+    // in its order.
+    QList<std::pair<int, Still>> shownStills(int fromMs, int toMs) const;
 
     static int s_nextId;
     static int s_nextClip;
@@ -293,5 +322,10 @@ private:
         bool stale = false;
     };
     mutable QHash<int, ClipFrame> m_clipFrames;
+    // By the video they are of.
+    QHash<QString, QList<Still>> m_stills;
+    // The still last shown, the pointer in it, read once.
+    mutable QString m_shownStillPath;
+    mutable QImage m_shownStill;
     int m_retiming = -1;
 };

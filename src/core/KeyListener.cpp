@@ -7,7 +7,7 @@
 #include <windows.h>
 #elif defined(Q_OS_MACOS)
 bool macKeyTapAllowed();
-void runMacKeyTap(KeyListener *listener, std::atomic<bool> &stop);
+void runMacKeyTap(KeyListener *listener, std::atomic<bool> &stop, bool buttons);
 #elif defined(GUCKSTE_HAVE_X11)
 #include <X11/XKBlib.h>
 #include <X11/Xlib.h>
@@ -209,6 +209,14 @@ LRESULT CALLBACK keyboardHook(int code, WPARAM wparam, LPARAM lparam)
     return CallNextHookEx(nullptr, code, wparam, lparam);
 }
 
+LRESULT CALLBACK mouseHook(int code, WPARAM wparam, LPARAM lparam)
+{
+    if (code == HC_ACTION && s_listener
+        && (wparam == WM_LBUTTONDOWN || wparam == WM_RBUTTONDOWN || wparam == WM_MBUTTONDOWN))
+        emit s_listener->buttonPressed();
+    return CallNextHookEx(nullptr, code, wparam, lparam);
+}
+
 } // namespace
 #endif
 
@@ -221,19 +229,24 @@ void KeyListener::run()
         s_listener = nullptr;
         return;
     }
-    // The hook needs this thread to pump messages.
+    HHOOK buttons = m_buttons ? SetWindowsHookExW(WH_MOUSE_LL, mouseHook, GetModuleHandleW(nullptr), 0) : nullptr;
+    // The hooks need this thread to pump messages, and every key and
+    // mouse move waits for them: so it wakes for each at once, and only
+    // looks at m_stop in between.
     while (!m_stop) {
+        MsgWaitForMultipleObjects(0, nullptr, FALSE, 100, QS_ALLINPUT);
         MSG msg;
         while (PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE)) {
             TranslateMessage(&msg);
             DispatchMessageW(&msg);
         }
-        Sleep(20);
     }
+    if (buttons)
+        UnhookWindowsHookEx(buttons);
     UnhookWindowsHookEx(hook);
     s_listener = nullptr;
 #elif defined(Q_OS_MACOS)
-    runMacKeyTap(this, m_stop);
+    runMacKeyTap(this, m_stop, m_buttons);
 #elif defined(GUCKSTE_HAVE_X11)
     Display *d = XOpenDisplay(nullptr);
     if (!d)
@@ -254,6 +267,8 @@ void KeyListener::run()
     mask.mask_len = sizeof(bits);
     mask.mask = bits;
     XISetMask(bits, XI_RawKeyPress);
+    if (m_buttons)
+        XISetMask(bits, XI_RawButtonPress);
     const Window root = DefaultRootWindow(d);
     XISelectEvents(d, root, &mask, 1);
     XFlush(d);
@@ -268,7 +283,12 @@ void KeyListener::run()
         XNextEvent(d, &ev);
         if (ev.xcookie.type != GenericEvent || ev.xcookie.extension != opcode || !XGetEventData(d, &ev.xcookie))
             continue;
-        if (ev.xcookie.evtype == XI_RawKeyPress) {
+        if (ev.xcookie.evtype == XI_RawButtonPress) {
+            // 4 to 7 are the wheel.
+            const int button = static_cast<XIRawEvent *>(ev.xcookie.data)->detail;
+            if (button >= 1 && button <= 3)
+                emit buttonPressed();
+        } else if (ev.xcookie.evtype == XI_RawKeyPress) {
             auto *raw = static_cast<XIRawEvent *>(ev.xcookie.data);
             const int keycode = raw->detail;
             // The modifiers at this moment, from the pointer query.

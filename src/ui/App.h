@@ -42,7 +42,8 @@ public:
 
     // "gui": pick a region; "full": all screens to clipboard and file;
     // "open <path>": the editor; "open": the editor with a file dialog;
-    // "record": pick a region to record, or stop the recording.
+    // "record": pick a region to record, or stop the recording; "still":
+    // keep the frame recorded now as a lossless still.
     void handleCommand(const QString &command);
 
     Q_INVOKABLE void capture();
@@ -65,9 +66,12 @@ public:
                                  int endMs, const QString &movable);
     // A new editor on what the document shows now, clips as images.
     Q_INVOKABLE void openFrame(Document *document);
-    // The editor on a video, as a clip of its own; a temporary recording
-    // is deleted unless it is saved.
-    void openVideoEditor(const QString &path, bool temporary);
+    // A new editor on the stills from `fromMs` to `toMs`, as one image.
+    Q_INVOKABLE void openStills(Document *document, int fromMs, int toMs);
+    // The editor on a video, as a clip of its own, with the stills of its
+    // recording; a temporary recording is deleted unless it is saved, its
+    // stills with the window.
+    void openVideoEditor(const QString &path, bool temporary, const QList<Still> &stills = {});
     Q_INVOKABLE bool isVideoFile(const QString &path) const;
     Q_INVOKABLE bool fileExists(const QString &path) const;
     Q_INVOKABLE void captureFull();
@@ -92,6 +96,10 @@ private slots:
     void onCountdownElapsed();
 
 private:
+    // Says when a picture of stills holds only `taken` of `count`.
+    void noticeSheet(int taken, int count);
+    // Where recordings wait for the editor, each in a folder of its own.
+    static QString temporaryRecordings();
     QQuickWindow *createWindow(const QString &type, const QVariantMap &properties);
     QQuickWindow *showEditor(Document *document, const QVariantMap &properties = {});
     void openOverlay(bool recordMode, const QRect &presetRegion = QRect(), int minimumWait = 0);
@@ -103,6 +111,7 @@ private:
     QElapsedTimer m_trayMenuClosed;
     QAction *m_launchAtLogin = nullptr;
     QAction *m_recordAction = nullptr;
+    QAction *m_stillAction = nullptr;
     ScreenRecorder *m_recorder = nullptr;
     QPointer<QQuickWindow> m_recordingControls;
     QPointer<QQuickWindow> m_countdown;

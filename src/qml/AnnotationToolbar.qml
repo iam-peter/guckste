@@ -300,11 +300,14 @@ ToolBar {
         }
         // The color from the picker, until a palette color is taken.
         Swatch {
+            id: customSwatch
             swatchColor: bar.customColor
             visible: bar.customColor.a > 0
-            ToolTip.text: qsTr("Your color %1").arg(bar.customColor.toString())
-            ToolTip.visible: hover.hovered
-            ToolTip.delay: 600
+            Tip {
+                text: qsTr("Your color %1").arg(bar.customColor.toString())
+                visible: customSwatch.hover.hovered
+                delay: 600
+            }
         }
         IconButton {
             id: paletteButton
@@ -364,9 +367,11 @@ ToolBar {
             textFromValue: (value, locale) => qsTr("%1 px").arg(value)
             valueFromText: (text, locale) => parseInt(text) || value
             onValueModified: bar.pickTextSize(value)
-            ToolTip.text: qsTr("Text size in pixels")
-            ToolTip.visible: hovered
-            ToolTip.delay: 600
+            Tip {
+                text: qsTr("Text size in pixels")
+                visible: textSizeBox.hovered
+                delay: 600
+            }
         }
         Slider {
             id: sizeSlider
@@ -377,8 +382,10 @@ ToolBar {
             stepSize: 1
             value: bar.size
             onMoved: bar.pickSize(value)
-            ToolTip.text: qsTr("Size: %1 px").arg(Math.round(value))
-            ToolTip.visible: hovered || pressed
+            Tip {
+                text: qsTr("Size: %1 px").arg(Math.round(sizeSlider.value))
+                visible: sizeSlider.hovered || sizeSlider.pressed
+            }
         }
     }
 

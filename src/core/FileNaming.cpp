@@ -37,9 +37,21 @@ QString FileNaming::expand(const QString &pattern, const QDateTime &time)
 QString FileNaming::uniquePath(const QString &dir, const QString &pattern, const QString &suffix,
                                const QDateTime &time)
 {
-    const QString base = expand(pattern, time);
+    return uniqueFile(dir, expand(pattern, time), suffix);
+}
+
+QString FileNaming::uniqueFile(const QString &dir, const QString &base, const QString &suffix)
+{
     QString path = dir + u'/' + base + u'.' + suffix;
     for (int n = 2; QFileInfo::exists(path); ++n)
         path = dir + u'/' + base + u'-' + QString::number(n) + u'.' + suffix;
+    return path;
+}
+
+QString FileNaming::uniqueFolder(const QString &dir, const QString &base)
+{
+    QString path = dir + u'/' + base;
+    for (int n = 2; QFileInfo::exists(path); ++n)
+        path = dir + u'/' + base + u'-' + QString::number(n);
     return path;
 }

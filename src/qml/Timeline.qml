@@ -4,8 +4,9 @@ import QtQuick
 import QtQuick.Controls
 import Guckste
 
-// The video's timeline: a ruler, the playhead, and the in and out handles
-// of the part to keep. Click or drag anywhere to scrub, drag a handle to
+// The video's timeline: a ruler, the playhead, the in and out handles of
+// the part to keep, and the lossless stills of a recording. Click or drag
+// anywhere to scrub, which snaps to a still close by; drag a handle to
 // trim; the parts cut away are dimmed.
 Item {
     id: timeline
@@ -22,6 +23,9 @@ Item {
     readonly property int effectiveEnd: trimEnd < 0 ? duration : trimEnd
     // The least that may be kept.
     property int minimumKept: 100
+    // {time, kind} of each still, as Document.stillMarks().
+    property var stills: []
+    readonly property real snapDistance: 5
     readonly property bool scrubbing: mouse.mode === "seek"
 
     signal seekRequested(int ms)
@@ -126,6 +130,27 @@ Item {
         color: "#70000000"
     }
 
+    // Stills, on the track's top edge: a click's before and after pair in
+    // yellow and orange, one kept on request in blue, one of a change in
+    // purple.
+    Repeater {
+        model: timeline.stills
+        Rectangle {
+            id: still
+            required property var modelData
+            objectName: "still"
+            x: timeline.msToX(modelData.time) - width / 2
+            y: timeline.trackY - height / 2
+            width: 7
+            height: 7
+            radius: 1
+            rotation: 45
+            color: ({kept: "#0a84ff", before: "#ffd60a", after: "#ff9f0a", change: "#bf5af2"})[modelData.kind]
+            border.color: "#a0000000"
+            border.width: 1
+        }
+    }
+
     // Playhead
     Item {
         x: timeline.msToX(timeline.position)
@@ -170,8 +195,7 @@ Item {
                 radius: 1
                 color: "#c0000000"
             }
-            ToolTip.visible: handle.dragged
-            ToolTip.text: timeline.time(handle.ms)
+            Tip { visible: handle.dragged; text: timeline.time(handle.ms) }
         }
     }
 
@@ -215,13 +239,29 @@ Item {
         onReleased: mode = ""
         onExited: hoverX = -1
 
+        // The still within reach of `x`, or -1.
+        function stillAt(x: real): int {
+            let best = -1
+            let bestDistance = timeline.snapDistance
+            for (const still of timeline.stills) {
+                const distance = Math.abs(timeline.msToX(still.time) - x)
+                if (distance <= bestDistance) {
+                    best = still.time
+                    bestDistance = distance
+                }
+            }
+            return best
+        }
+
         function apply(x: real) {
             // Within the video, past which there is nothing to see.
             const ms = Math.min(timeline.xToMs(x), timeline.duration)
             switch (mode) {
-            case "seek":
-                timeline.seekRequested(ms)
+            case "seek": {
+                const still = stillAt(x)
+                timeline.seekRequested(still >= 0 ? still : ms)
                 break
+            }
             case "start":
                 timeline.trimStartRequested(Math.min(ms, timeline.effectiveEnd - timeline.minimumKept))
                 break
@@ -231,8 +271,26 @@ Item {
             }
         }
 
-        ToolTip.visible: hoverX >= 0 && mode === "" && handleAt(hoverX) === ""
-        ToolTip.text: timeline.time(timeline.xToMs(hoverX))
-        ToolTip.delay: 300
+        // Over the pointer, not the middle of the timeline.
+        Tip {
+            x: mouse.hoverX - width / 2
+            visible: mouse.hoverX >= 0 && mouse.mode === "" && mouse.handleAt(mouse.hoverX) === ""
+            delay: 300
+            text: mouse.hoverText
+        }
+
+        readonly property string hoverText: {
+            const still = timeline.stills.find(s => s.time === stillAt(hoverX))
+            const at = timeline.time(still ? still.time : timeline.xToMs(hoverX))
+            if (!still)
+                return at
+            if (still.kind === "before")
+                return qsTr("%1, lossless still before a click").arg(at)
+            if (still.kind === "after")
+                return qsTr("%1, lossless still after a click").arg(at)
+            if (still.kind === "change")
+                return qsTr("%1, lossless still after the screen changed").arg(at)
+            return qsTr("%1, lossless still").arg(at)
+        }
     }
 }

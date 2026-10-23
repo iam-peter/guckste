@@ -1,6 +1,7 @@
 #include "Document.h"
 
 #include "AnnotationPainter.h"
+#include "FileNaming.h"
 #include "VideoFrames.h"
 
 #include <QBuffer>
@@ -1138,6 +1139,21 @@ void Document::setClipImage(int clip, const QImage &image)
 
 QImage Document::clipImage(const Annotation &clip) const
 {
+    if (const Still *still = stillOf(clip)) {
+        if (m_shownStillPath != still->path) {
+            // As the video shows it: the pointer in it.
+            QImage image = QImage(still->path).convertToFormat(QImage::Format_ARGB32_Premultiplied);
+            if (!image.isNull() && !still->pointer.isNull()) {
+                QPainter painter(&image);
+                painter.setRenderHint(QPainter::SmoothPixmapTransform);
+                painter.drawImage(still->pointerRect, still->pointer);
+            }
+            m_shownStillPath = still->path;
+            m_shownStill = image;
+        }
+        if (!m_shownStill.isNull())
+            return m_shownStill;
+    }
     const auto found = m_clipFrames.find(clip.clip);
     if (found == m_clipFrames.end())
         return clip.image;
@@ -1156,9 +1172,12 @@ Document *Document::frameDocument() const
         if (!a.shownAt(m_time))
             continue;
         Annotation layer = a;
+        Annotation pointer;
         if (a.type == Annotation::Type::Video) {
             layer.type = Annotation::Type::Image;
-            layer.image = clipImage(a);
+            const Still *still = stillOf(a);
+            const QImage lossless = still ? QImage(still->path) : QImage();
+            layer.image = lossless.isNull() ? clipImage(a) : lossless.convertToFormat(QImage::Format_ARGB32_Premultiplied);
             layer.source.clear();
             layer.clip = 0;
             if (layer.image.isNull())
@@ -1169,10 +1188,24 @@ Document *Document::frameDocument() const
                              .arg(at / 60000)
                              .arg(at / 1000 % 60, 2, 10, QLatin1Char('0'))
                              .arg(at / 100 % 10);
+            if (!lossless.isNull() && !still->pointer.isNull()) {
+                // Where the still has it, on the clip as it is placed.
+                const QRectF r = a.rect();
+                const qreal sx = r.width() / lossless.width();
+                const qreal sy = r.height() / lossless.height();
+                const QRectF p = still->pointerRect;
+                pointer.type = Annotation::Type::Image;
+                pointer.name = tr("Pointer");
+                pointer.image = still->pointer.convertToFormat(QImage::Format_ARGB32_Premultiplied);
+                pointer.points = {r.topLeft() + QPointF(p.x() * sx, p.y() * sy),
+                                  r.topLeft() + QPointF(p.right() * sx, p.bottom() * sy)};
+            }
         }
         layer.startMs = 0;
         layer.endMs = -1;
         layers << layer;
+        if (!pointer.image.isNull())
+            layers << pointer;
     }
     still->m_annotations = layers;
     still->m_guides = m_guides;
@@ -1208,5 +1241,180 @@ void Document::relinkSource(const QString &from, const QString &to)
         relink(step);
     for (QList<Annotation> &step : m_redo)
         relink(step);
+    if (m_stills.contains(from))
+        m_stills.insert(to, m_stills.take(from));
     emit changed();
+}
+
+void Document::addStills(const QString &source, const QList<Still> &stills)
+{
+    if (stills.isEmpty())
+        return;
+    m_stills[source] << stills;
+    std::sort(m_stills[source].begin(), m_stills[source].end(),
+              [](const Still &a, const Still &b) { return a.ms < b.ms; });
+    emit changed();
+}
+
+const Still *Document::stillOf(const Annotation &clip) const
+{
+    if (clip.type != Annotation::Type::Video || m_time < 0 || !clip.shownAt(m_time))
+        return nullptr;
+    const auto found = m_stills.constFind(clip.source);
+    if (found == m_stills.constEnd())
+        return nullptr;
+    const int at = m_time - clip.startMs + clip.clipIn;
+    for (const Still &still : *found) {
+        if (still.ms == at)
+            return &still;
+    }
+    return nullptr;
+}
+
+QVariantList Document::stillMarks() const
+{
+    const auto kindOf = [](Still::Kind kind) {
+        switch (kind) {
+        case Still::Kind::BeforeClick:
+            return QStringLiteral("before");
+        case Still::Kind::AfterClick:
+            return QStringLiteral("after");
+        case Still::Kind::Change:
+            return QStringLiteral("change");
+        case Still::Kind::Kept:
+            break;
+        }
+        return QStringLiteral("kept");
+    };
+    QVariantList list;
+    for (const auto &[time, still] : shownStills(0, -1))
+        list << QVariantMap{{QStringLiteral("time"), time}, {QStringLiteral("kind"), kindOf(still.kind)}};
+    return list;
+}
+
+QList<std::pair<int, Still>> Document::shownStills(int fromMs, int toMs) const
+{
+    QList<std::pair<int, Still>> shown;
+    for (const Annotation &clip : m_annotations) {
+        if (clip.type != Annotation::Type::Video)
+            continue;
+        const auto found = m_stills.constFind(clip.source);
+        if (found == m_stills.constEnd())
+            continue;
+        const int end = clip.endMs >= 0 ? clip.endMs : clip.startMs + clip.sourceMs - clip.clipIn;
+        for (const Still &still : *found) {
+            const int time = clip.startMs + still.ms - clip.clipIn;
+            if (still.ms >= clip.clipIn && time < end && time >= fromMs && (toMs < 0 || time <= toMs))
+                shown.append({time, still});
+        }
+    }
+    std::stable_sort(shown.begin(), shown.end(), [](const auto &a, const auto &b) { return a.first < b.first; });
+    return shown;
+}
+
+int Document::stillCount(int fromMs, int toMs) const
+{
+    return int(shownStills(fromMs, toMs).size());
+}
+
+int Document::saveStills(const QString &directory, int fromMs, int toMs) const
+{
+    const auto shown = shownStills(fromMs, toMs);
+    if (shown.isEmpty() || !QDir().mkpath(directory))
+        return 0;
+    const auto sameFile = [](const QString &a, const QString &b) {
+        QFile fa(a), fb(b);
+        return fa.size() == fb.size() && fa.open(QIODevice::ReadOnly) && fb.open(QIODevice::ReadOnly)
+               && fa.readAll() == fb.readAll();
+    };
+    int saved = 0;
+    for (const auto &[time, still] : shown) {
+        if (!QFileInfo::exists(still.path)) {
+            qWarning("The still %s is gone", qPrintable(still.path));
+            continue;
+        }
+        const QFileInfo source(still.path);
+        QString target = QDir(directory).filePath(source.fileName());
+        // Already there, from this folder or an earlier save; another
+        // recording's still of the name is left alone.
+        if (QFileInfo::exists(target) && !sameFile(still.path, target))
+            target = FileNaming::uniqueFile(directory, source.completeBaseName(), source.suffix());
+        if (QFileInfo::exists(target) || QFile::copy(still.path, target))
+            ++saved;
+        else
+            qWarning("Could not copy %s to %s", qPrintable(still.path), qPrintable(target));
+    }
+    return saved;
+}
+
+Document *Document::stillsDocument(int fromMs, int toMs, int *taken) const
+{
+    return sheetOf(shownStills(fromMs, toMs), taken);
+}
+
+Document *Document::sheetOf(QList<std::pair<int, Still>> shown, int *taken)
+{
+    if (shown.size() > maxStillsInOne)
+        shown.resize(maxStillsInOne);
+    struct Picture
+    {
+        QImage image;
+        int time;
+        const Still *still;
+    };
+    QList<Picture> pictures;
+    QSize cell;
+    qint64 pixels = 0;
+    for (const auto &[time, still] : std::as_const(shown)) {
+        // The size from the file first, to stop before reading too much.
+        const QSize size = QImageReader(still.path).size();
+        pixels += qint64(size.width()) * size.height();
+        if (!pictures.isEmpty() && pixels > maxPixelsInOne)
+            break;
+        const QImage image = QImage(still.path).convertToFormat(QImage::Format_ARGB32_Premultiplied);
+        if (image.isNull())
+            continue;
+        pictures.append({image, time, &still});
+        cell = cell.expandedTo(image.size());
+    }
+    if (taken)
+        *taken = int(pictures.size());
+    // In rows of three, in their order, apart enough to draw between.
+    const int columns = qMax(1, qMin(3, int(pictures.size())));
+    const int gap = 48;
+    const QStringList kinds{tr("kept"), tr("before a click"), tr("after a click"), tr("after a change")};
+    QList<Annotation> layers;
+    for (int i = 0; i < pictures.size(); ++i) {
+        const auto &[image, time, still] = pictures[i];
+        const QPointF at((i % columns) * (cell.width() + gap), (i / columns) * (cell.height() + gap));
+        Annotation layer;
+        layer.type = Annotation::Type::Image;
+        layer.image = image;
+        layer.points = {at, at + QPointF(image.width(), image.height())};
+        layer.name = tr("%1 · %2 at %3:%4.%5")
+                         .arg(i + 1)
+                         .arg(kinds.value(int(still->kind)))
+                         .arg(time / 60000)
+                         .arg(time / 1000 % 60, 2, 10, QLatin1Char('0'))
+                         .arg(time / 100 % 10);
+        layers << layer;
+        if (!still->pointer.isNull()) {
+            Annotation pointer;
+            pointer.type = Annotation::Type::Image;
+            pointer.name = tr("Pointer");
+            pointer.image = still->pointer.convertToFormat(QImage::Format_ARGB32_Premultiplied);
+            pointer.points = {at + still->pointerRect.topLeft(), at + still->pointerRect.bottomRight()};
+            layers << pointer;
+        }
+    }
+    auto *sheet = new Document;
+    sheet->m_annotations = layers;
+    emit sheet->changed();
+    return sheet;
+}
+
+bool Document::stillShown() const
+{
+    return std::any_of(m_annotations.cbegin(), m_annotations.cend(),
+                       [this](const Annotation &a) { return stillOf(a) != nullptr; });
 }

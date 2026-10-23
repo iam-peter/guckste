@@ -2,6 +2,7 @@
 
 #include "KeyListener.h"
 #include "KeyOverlay.h"
+#include "StillKeeper.h"
 
 #include <QAudioInput>
 #include <QElapsedTimer>
@@ -40,6 +41,7 @@ class ScreenRecorder : public QObject
     Q_PROPERTY(QStringList recentKeys READ recentKeys NOTIFY recentKeysChanged)
     // The first moment of a recording, left out of it: see warmUpMs.
     Q_PROPERTY(bool starting READ starting NOTIFY startingChanged)
+    Q_PROPERTY(int stillCount READ stillCount NOTIFY stillsChanged)
 
 public:
     enum State { Idle, Recording, Paused, Stopping };
@@ -50,7 +52,7 @@ public:
 
     State state() const { return m_state; }
     // Milliseconds recorded, pauses left out.
-    qint64 duration() const { return m_recorder.duration(); }
+    qint64 duration() const { return m_options.video ? m_recorder.duration() : m_stillsMs; }
     // The region in logical screen coordinates, as it is recorded.
     QRect region() const { return m_region; }
     bool wholeScreen() const { return m_wholeScreen; }
@@ -78,6 +80,12 @@ public:
         bool microphone = false;
         bool includeCursor = true;
         bool showKeys = false;
+        // A still before and after every click in the region.
+        bool stillsOnClicks = false;
+        // A still of what the screen settles on after it changes.
+        bool stillsOnChanges = false;
+        // Without it only the stills are kept, and nothing is encoded.
+        bool video = true;
     };
     bool start(const QRect &region, const QString &path, const Options &options);
     // Keys pressed while recording, for the panel.
@@ -85,9 +93,16 @@ public:
     Q_INVOKABLE void pause();
     Q_INVOKABLE void resume();
     Q_INVOKABLE void stop();
+    // Keeps the frame shown now as a still, lossless.
+    Q_INVOKABLE void keepStill();
 
     // The first frame recorded, for a preview of the file.
     QImage firstFrame() const { return m_firstFrame; }
+    // The stills of the recording, as PNGs beside it in its folder: see
+    // stillsDirectory().
+    QList<Still> stills() const { return m_stills.stills(); }
+    int stillCount() const { return int(m_stills.stills().size()); }
+    static QString stillsDirectory(const QString &recording);
 
 signals:
     void stateChanged();
@@ -96,16 +111,21 @@ signals:
     void outputPathChanged();
     // The file is complete.
     void finished(const QString &path);
+    // A recording of stills only is over, or one whose video failed:
+    // its stills are in `directory`.
+    void stillsFinished(const QString &directory);
     void errorOccurred(const QString &message);
     // Something to tell that does not stop the recording.
     void notice(const QString &message);
     void recentKeysChanged();
     void startingChanged();
+    void stillsChanged();
 
 private:
     void setState(State state);
     bool startCapture(QScreen *preferred);
     void onFrame(const QVideoFrame &frame);
+    void onButtonPressed();
     void beginEncoding();
     void finish();
 
@@ -120,6 +140,8 @@ private:
     bool m_wholeScreen = false;
     QString m_outputPath;
     QImage m_firstFrame;
+    // The time of the last frame, for a recording without a video.
+    qint64 m_stillsMs = 0;
     Options m_options;
     bool m_failed = false;
     // Paused time so far, taken off the frames' timestamps.
@@ -139,4 +161,5 @@ private:
     std::unique_ptr<QAudioInput> m_audio;
     std::unique_ptr<KeyListener> m_keyListener;
     KeyOverlay m_keys;
+    StillKeeper m_stills;
 };

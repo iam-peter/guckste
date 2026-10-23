@@ -168,7 +168,17 @@ QImage desktop(QSize size, const QList<std::pair<QImage, QPoint>> &windows)
 }
 
 // A short video of one color, written from frames.
+QString writeVideoOf(const QString &path, const QList<QImage> &images);
+
 QString writeVideo(const QString &path, int frames, const QColor &color)
+{
+    QImage image(320, 240, QImage::Format_RGB32);
+    image.fill(color);
+    return writeVideoOf(path, QList<QImage>(frames, image));
+}
+
+// A video of the images, one a frame at 30 fps, as big as the first.
+QString writeVideoOf(const QString &path, const QList<QImage> &images)
 {
     QMediaCaptureSession session;
     QVideoFrameInput input;
@@ -179,13 +189,11 @@ QString writeVideo(const QString &path, int frames, const QColor &color)
     format.setAudioCodec(QMediaFormat::AudioCodec::Unspecified);
     recorder.setMediaFormat(format);
     recorder.setVideoFrameRate(30);
-    recorder.setVideoResolution(QSize(320, 240));
+    recorder.setVideoResolution(images.value(0).size());
     recorder.setOutputLocation(QUrl::fromLocalFile(path));
     recorder.record();
-    QImage image(320, 240, QImage::Format_RGB32);
-    image.fill(color);
-    for (int i = 0; i < frames; ++i) {
-        QVideoFrame frame = VideoFrames::toNV12(image);
+    for (int i = 0; i < images.size(); ++i) {
+        QVideoFrame frame = VideoFrames::toNV12(images[i]);
         frame.setStartTime(i * 33333);
         frame.setEndTime((i + 1) * 33333);
         if (!QTest::qWaitFor([&input, &frame] { return input.sendVideoFrame(frame); }, 5000))
@@ -834,6 +842,197 @@ private slots:
             delete window;
         }
 
+        // 4. Stills: a recording of a click on the settings' stills box,
+        // with the stills before and after it, in the editor, and the one
+        // after opened as an image, the pointer a layer of its own.
+        {
+            QQmlComponent component(m_engine);
+            component.loadFromModule("Guckste", "SettingsWindow");
+            auto *settingsAgain = qobject_cast<QQuickWindow *>(component.create());
+            QVERIFY2(settingsAgain, qPrintable(component.errorString()));
+            settingsAgain->show();
+            QVERIFY(QTest::qWaitForWindowExposed(settingsAgain));
+            // Shown as on X11: offscreen has nothing to listen to keys and
+            // clicks with, and leaves those boxes out.
+            QQuickItem *box = nullptr;
+            const std::function<void(QQuickItem *)> find = [&](QQuickItem *item) {
+                const QString text = item->property("text").toString();
+                if (item->inherits("QQuickCheckBox") && (text.contains(u"keys"_s) || text.contains(u"each click"_s))) {
+                    item->setVisible(true);
+                    if (text.contains(u"each click"_s))
+                        box = item;
+                }
+                for (QQuickItem *child : item->childItems())
+                    find(child);
+            };
+            find(settingsAgain->contentItem());
+            QVERIFY(box);
+            QTest::qWait(100);
+            const QPointF boxAt = box->mapToScene(QPointF(12, box->height() / 2));
+            box->setProperty("hoverEnabled", true);
+            QTest::mouseMove(settingsAgain, boxAt.toPoint());
+            QTest::qWait(150);
+            const QImage hovered = settingsAgain->grabWindow();
+            Preferences::instance()->setStillsOnClicks(true);
+            QTest::qWait(150);
+            const QImage checked = settingsAgain->grabWindow();
+            Preferences::instance()->setStillsOnClicks(false);
+            settingsAgain->close();
+            delete settingsAgain;
+
+            // The region recorded: the settings window and a margin.
+            const QRect region = QRect(settingsAt, settingsWindow.size()).adjusted(-24, -24, 24, 24);
+            const auto shot = [&](const QImage &content) {
+                const QImage screen = desktop(QSize(1280, 800), {{framed(content, u"Guckste Settings"_s), settingsAt},
+                                                                {terminalWindow, terminalAt}});
+                return screen.copy(QRect(region.topLeft(), QSize(region.width() & ~1, region.height() & ~1)));
+            };
+            const QImage before = shot(hovered);
+            const QImage after = shot(checked);
+            QImage pointer(18, 26, QImage::Format_ARGB32_Premultiplied);
+            pointer.fill(Qt::transparent);
+            {
+                QPainter p(&pointer);
+                p.setRenderHint(QPainter::Antialiasing);
+                p.setPen(QPen(Qt::white, 1.5));
+                p.setBrush(Qt::black);
+                p.drawPolygon(QPolygonF({{1, 1}, {1, 20}, {6, 15.5}, {9.5, 23.5}, {12.5, 22}, {9, 14.5}, {15, 14.5}}));
+            }
+            const QPointF tip = boxAt + QPointF(0, 30) + settingsAt - region.topLeft();
+            const QRectF pointerRect(tip - QPointF(1, 1), QSizeF(pointer.size()));
+            const auto withPointer = [&](QImage image) {
+                QPainter(&image).drawImage(pointerRect, pointer);
+                return image;
+            };
+            QList<QImage> frames;
+            for (int i = 0; i < 90; ++i)
+                frames << withPointer(i < 45 ? before : after);
+            QTemporaryDir videoDir;
+            const QString clip = writeVideoOf(videoDir.path() + u"/Recording.mp4"_s, frames);
+            QVERIFY(!clip.isEmpty());
+            const auto msOf = [](int frame) { return int((frame * 33333LL + 999) / 1000); };
+            Still beforeStill;
+            beforeStill.path = videoDir.path() + u"/01-before-click.png"_s;
+            beforeStill.ms = msOf(44);
+            beforeStill.kind = Still::Kind::BeforeClick;
+            beforeStill.pointer = pointer;
+            beforeStill.pointerRect = pointerRect;
+            Still afterStill = beforeStill;
+            afterStill.path = videoDir.path() + u"/02-after-click.png"_s;
+            afterStill.ms = msOf(45 + 9);
+            afterStill.kind = Still::Kind::AfterClick;
+            QVERIFY(before.save(beforeStill.path) && after.save(afterStill.path));
+
+            Document *document = nullptr;
+            QQuickWindow *window = videoEditor(clip, document);
+            QVERIFY(window);
+            document->addStills(clip, {beforeStill, afterStill});
+            window->resize(1400, 900);
+            window->show();
+            QVERIFY(QTest::qWaitForWindowExposed(window));
+            auto *playback = window->findChild<QObject *>(u"playback"_s);
+            QVERIFY(playback);
+            QTRY_VERIFY(playback->property("duration").toInt() > 0);
+            playback->setProperty("position", afterStill.ms);
+            QTRY_VERIFY(window->property("atStill").toBool());
+            QMetaObject::invokeMethod(window, "zoomToFit");
+            QTest::qWait(300);
+            window->grabWindow().save(dir + u"/stills-editor.png"_s);
+
+            // Close up: the box's label in a frame of the video, as the
+            // player decodes it, and in the still.
+            QSignalSpy decodedFrames(document, &Document::framesChanged);
+            playback->setProperty("position", afterStill.ms + 100);
+            QTRY_VERIFY(!window->property("atStill").toBool());
+            QTRY_VERIFY(decodedFrames.count() > 0);
+            QTest::qWait(300);
+            const QImage decoded = document->clipImage(document->annotations().first());
+            const QRect label(qRound(tip.x()) + 16, qRound(tip.y()) - 11, 150, 22);
+            const int zoom = 4;
+            const int caption = 30;
+            QImage compare(label.width() * zoom, 2 * (label.height() * zoom + caption), QImage::Format_RGB32);
+            compare.fill(QColor(0xfb, 0xf8, 0xf7));
+            {
+                QPainter p(&compare);
+                QFont font = p.font();
+                font.setPixelSize(15);
+                p.setFont(font);
+                p.setPen(QColor(0x22, 0x17, 0x1c));
+                const auto part = [&](const QImage &from, int top, const QString &text) {
+                    p.drawText(QRect(0, top, compare.width(), caption), Qt::AlignVCenter, text);
+                    p.drawImage(QRect(0, top + caption, label.width() * zoom, label.height() * zoom),
+                                from.copy(label).scaled(label.size() * zoom));
+                };
+                part(decoded, 0, u"A frame of the video"_s);
+                part(after, label.height() * zoom + caption, u"The lossless still"_s);
+            }
+            compare.save(dir + u"/stills-compare.png"_s);
+            playback->setProperty("position", afterStill.ms);
+            QTRY_VERIFY(window->property("atStill").toBool());
+
+            const QList<QWindow *> others = QGuiApplication::topLevelWindows();
+            QVERIFY(QMetaObject::invokeMethod(window, "takeFrame"));
+            QQuickWindow *still = nullptr;
+            QTRY_VERIFY((still = [&]() -> QQuickWindow * {
+                for (QWindow *w : QGuiApplication::topLevelWindows()) {
+                    if (!others.contains(w) && w->property("videoMode").isValid() && w->isVisible())
+                        return qobject_cast<QQuickWindow *>(w);
+                }
+                return nullptr;
+            }()));
+            auto *frame = still->property("document").value<Document *>();
+            QVERIFY(frame);
+            QCOMPARE(frame->annotationCount(), 2);
+            frame->setLocked(0, false);
+            frame->setSelectedIndex(1);
+            still->resize(1400, 900);
+            QTest::qWait(200);
+            QMetaObject::invokeMethod(still, "zoomToFit");
+            QTest::qWait(300);
+            still->grabWindow().save(dir + u"/stills-frame.png"_s);
+            still->setProperty("discardConfirmed", true);
+            still->close();
+
+            // Both stills as one picture, a number on each and an arrow
+            // across to what the click led to.
+            const QList<QWindow *> beforeSheet = QGuiApplication::topLevelWindows();
+            m_app->openStills(document, 0, -1);
+            QQuickWindow *sheet = nullptr;
+            QTRY_VERIFY((sheet = [&]() -> QQuickWindow * {
+                for (QWindow *w : QGuiApplication::topLevelWindows()) {
+                    if (!beforeSheet.contains(w) && w->property("videoMode").isValid() && w->isVisible())
+                        return qobject_cast<QQuickWindow *>(w);
+                }
+                return nullptr;
+            }()));
+            auto *flow = sheet->property("document").value<Document *>();
+            QVERIFY(flow);
+            const QColor red(0xff, 0x3b, 0x30);
+            const QRectF second = flow->annotations()[2].rect();
+            flow->beginAnnotation(Document::Counter, 16, 16, red, 6);
+            flow->commitAnnotation();
+            flow->beginAnnotation(Document::Counter, second.x() + 16, 16, red, 6);
+            flow->commitAnnotation();
+            flow->beginAnnotation(Document::Arrow, second.x() - 70, tip.y(), red, 6);
+            flow->updateAnnotation(second.x() + tip.x() - 14, tip.y(), false);
+            flow->commitAnnotation();
+            flow->setSelectedIndex(-1);
+            sheet->resize(1400, 900);
+            QTest::qWait(200);
+            QMetaObject::invokeMethod(sheet, "zoomToFit");
+            QTest::qWait(300);
+            sheet->grabWindow().save(dir + u"/stills-sheet.png"_s);
+            sheet->setProperty("discardConfirmed", true);
+            sheet->close();
+            window->setProperty("discardConfirmed", true);
+            window->close();
+            QTRY_VERIFY(!window->isVisible());
+            delete window;
+
+            // The settings around the box, its neighbours above and below.
+            checked.copy(QRect(0, qRound(boxAt.y()) - 110, checked.width(), 170)).save(dir + u"/stills-settings.png"_s);
+        }
+
         // 3. Measuring: a corner of the settings at 800 %, the pixel grid
         // on, marks counting the pixels.
         {
@@ -905,8 +1104,37 @@ private slots:
         QVERIFY(QTest::qWaitForWindowExposed(window));
         QVERIFY(QMetaObject::invokeMethod(window, "time", Q_RETURN_ARG(QString, m_time), Q_ARG(int, 65000)));
         QCOMPARE(m_time, u"01:05"_s);
+        // Stills are kept while recording only.
+        auto *keepStill = window->findChild<QQuickItem *>(u"keepStill"_s);
+        QVERIFY(keepStill);
+        QVERIFY(!keepStill->isEnabled());
+        // A tooltip in a window of its own, beside the panel on the side
+        // away from the region, and not over its buttons.
+        auto *stop = window->findChild<QQuickItem *>(u"stop"_s);
+        QVERIFY(stop);
+        // Hovering is on with a mouse, which offscreen does not say.
+        stop->setProperty("hoverEnabled", true);
+        QTest::mouseMove(window, stop->mapToScene(QPointF(stop->width() / 2, stop->height() / 2)).toPoint());
+        QObject *tip = tipOf(stop);
+        QVERIFY(tip);
+        QTRY_VERIFY(tip->property("opened").toBool());
+        QCOMPARE(tip->property("popupType").toInt(), 1); // Popup.Window
+        if (window->property("tipsBelow").toBool())
+            QVERIFY(tip->property("y").toReal() >= stop->height());
+        else
+            QVERIFY(tip->property("y").toReal() + tip->property("height").toReal() <= 0);
         window->close();
         delete window;
+    }
+
+    // The tooltip of an item, as Tip.qml makes one.
+    static QObject *tipOf(QObject *item)
+    {
+        for (QObject *child : item->findChildren<QObject *>()) {
+            if (child->inherits("QQuickToolTip"))
+                return child;
+        }
+        return nullptr;
     }
 
     // What a video file holds, read as the app reads it.
@@ -1138,13 +1366,14 @@ private slots:
         const QPoint end = at(span, 0) - QPoint(4, 0);
         QTest::mouseMove(window, at(span, 0) - QPoint(30, 0));
         // Moving about at the edge makes no room by itself; held there,
-        // a tenth or so a second.
+        // a tenth or so a second, at least 100 ms each 100 ms, give or
+        // take a tick.
         for (int i = 0; i < 10; ++i)
             QTest::mouseMove(window, end - QPoint(i % 2, 0));
         QVERIFY(lanes->property("span").toInt() < span * 1.05);
         QTest::qWait(1000);
         const int grown = lanes->property("span").toInt();
-        QVERIFY2(grown > span * 1.05 && grown < span * 1.25, qPrintable(u"%1 to %2"_s.arg(span).arg(grown)));
+        QVERIFY2(grown > span * 1.05 && grown < span * 1.3, qPrintable(u"%1 to %2"_s.arg(span).arg(grown)));
         QTest::mouseRelease(window, Qt::LeftButton, Qt::NoModifier, end);
         QVERIFY2(document->annotationEnd(1) > length + 500, qPrintable(QString::number(document->annotationEnd(1))));
         QCOMPARE(document->duration(), document->annotationEnd(1));
@@ -1402,6 +1631,118 @@ private slots:
         QVERIFY2(seen.blue() > 80 && seen.red() < 60, qPrintable(seen.name()));
         still->setProperty("discardConfirmed", true);
         still->close();
+
+        window->setProperty("discardConfirmed", true);
+        window->close();
+        QTRY_VERIFY(!window->isVisible());
+        delete window;
+    }
+
+    // A recording's stills: marks on the timeline, which a click close by
+    // and Ctrl+. and Ctrl+, go to, shown there in place of the decoded
+    // frame, and opened lossless as an image.
+    void editorFindsStills()
+    {
+        QTemporaryDir dir;
+        const QString clip = writeVideo(dir.path() + u"/clip.mp4"_s, 60, Qt::darkCyan);
+        QVERIFY(!clip.isEmpty());
+        QImage magenta(320, 240, QImage::Format_RGB32);
+        magenta.fill(Qt::magenta);
+        QVERIFY(magenta.save(dir.path() + u"/01-kept.png"_s));
+        Still kept;
+        kept.path = dir.path() + u"/01-kept.png"_s;
+        kept.ms = 500;
+        Still before = kept;
+        before.ms = 1000;
+        before.kind = Still::Kind::BeforeClick;
+        Document *document = nullptr;
+        QQuickWindow *window = videoEditor(clip, document);
+        QVERIFY(window);
+        document->addStills(clip, {kept, before});
+        window->show();
+        QVERIFY(QTest::qWaitForWindowExposed(window));
+        auto *timeline = window->findChild<QQuickItem *>(u"timeline"_s);
+        auto *playback = window->findChild<QObject *>(u"playback"_s);
+        QVERIFY(timeline && playback);
+        QTRY_COMPARE(timeline->property("stills").toList().size(), 2);
+        int marks = 0;
+        const std::function<void(QQuickItem *)> count = [&](QQuickItem *item) {
+            marks += item->objectName() == u"still"_s;
+            for (QQuickItem *child : item->childItems())
+                count(child);
+        };
+        count(timeline);
+        QCOMPARE(marks, 2);
+        // The time under the pointer, over it rather than mid-timeline.
+        const QPointF hover = timeline->mapToScene(QPointF(timeline->width() * 0.2, timeline->height() / 2));
+        QTest::mouseMove(window, hover.toPoint());
+        QObject *tip = nullptr;
+        QTRY_VERIFY((tip = tipOf(timeline)) && tip->property("opened").toBool());
+        const qreal tipMiddle = timeline->mapToScene(
+            QPointF(tip->property("x").toReal() + tip->property("width").toReal() / 2, 0)).x();
+        QVERIFY2(qAbs(tipMiddle - hover.x()) < 2, qPrintable(u"%1 for %2"_s.arg(tipMiddle).arg(hover.x())));
+
+        // A click a little off the mark lands on it.
+        qreal x = 0;
+        QMetaObject::invokeMethod(timeline, "msToX", Q_RETURN_ARG(qreal, x), Q_ARG(int, 500));
+        const qreal y = timeline->property("trackY").toReal() + 4;
+        QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier, timeline->mapToScene(QPointF(x + 3, y)).toPoint());
+        QTRY_COMPARE(playback->property("position").toInt(), 500);
+        QTRY_VERIFY(window->property("atStill").toBool());
+        QCOMPARE(document->clipImage(document->annotations().first()).pixelColor(100, 100), QColor(Qt::magenta));
+        QTest::keyClick(window, Qt::Key_Period, Qt::ControlModifier);
+        QTRY_COMPARE(playback->property("position").toInt(), 1000);
+        QTest::keyClick(window, Qt::Key_Comma, Qt::ControlModifier);
+        QTRY_COMPARE(playback->property("position").toInt(), 500);
+        QTest::keyClick(window, Qt::Key_Period);
+        QTRY_VERIFY(!window->property("atStill").toBool());
+        QTest::keyClick(window, Qt::Key_Comma);
+        QTRY_VERIFY(window->property("atStill").toBool());
+
+        const QList<QWindow *> others = QGuiApplication::topLevelWindows();
+        QVERIFY(QMetaObject::invokeMethod(window, "takeFrame"));
+        QQuickWindow *still = nullptr;
+        QTRY_VERIFY((still = [&]() -> QQuickWindow * {
+            for (QWindow *w : QGuiApplication::topLevelWindows()) {
+                if (!others.contains(w) && w->property("videoMode").isValid() && w->isVisible())
+                    return qobject_cast<QQuickWindow *>(w);
+            }
+            return nullptr;
+        }()));
+        auto *frame = still->property("document").value<Document *>();
+        QVERIFY(frame);
+        QCOMPARE(frame->render(1).pixelColor(100, 100), QColor(Qt::magenta));
+        still->setProperty("discardConfirmed", true);
+        still->close();
+
+        // The stills of a recording saved into its folder, and opened as
+        // one picture.
+        QTemporaryDir saveDir;
+        const QString savedTo = Preferences::instance()->saveDirectory();
+        Preferences::instance()->setSaveDirectory(saveDir.path());
+        window->setProperty("recordingName", u"rec"_s);
+        QCOMPARE(window->property("keptStills").toInt(), 2);
+        QVERIFY(window->findChild<QQuickItem *>(u"saveStillsButton"_s)->property("available").toBool());
+        QVERIFY(QMetaObject::invokeMethod(window, "saveStills"));
+        QVERIFY(QFileInfo::exists(saveDir.path() + u"/rec/01-kept.png"_s));
+        QCOMPARE(window->property("videoTarget").isValid(), false);
+        QString target;
+        QVERIFY(QMetaObject::invokeMethod(window, "videoTarget", Q_RETURN_ARG(QString, target)));
+        QCOMPARE(target, saveDir.path() + u"/rec/rec."_s + m_app->recordingSuffix());
+        Preferences::instance()->setSaveDirectory(savedTo);
+        const QList<QWindow *> beforeSheet = QGuiApplication::topLevelWindows();
+        m_app->openStills(document, 0, -1);
+        QQuickWindow *sheet = nullptr;
+        QTRY_VERIFY((sheet = [&]() -> QQuickWindow * {
+            for (QWindow *w : QGuiApplication::topLevelWindows()) {
+                if (!beforeSheet.contains(w) && w->property("videoMode").isValid() && w->isVisible())
+                    return qobject_cast<QQuickWindow *>(w);
+            }
+            return nullptr;
+        }()));
+        QCOMPARE(sheet->property("document").value<Document *>()->annotationCount(), 2);
+        sheet->setProperty("discardConfirmed", true);
+        sheet->close();
 
         window->setProperty("discardConfirmed", true);
         window->close();

@@ -26,6 +26,9 @@ const auto kQuality = "recording/quality";
 const auto kEditAfter = "recording/editAfterRecording";
 const auto kIncludeCursor = "capture/includeCursor";
 const auto kShowKeys = "recording/showKeys";
+const auto kStillsOnClicks = "recording/stillsOnClicks";
+const auto kStillsOnChanges = "recording/stillsOnChanges";
+const auto kStillsOnly = "recording/stillsOnly";
 const auto kLastRegion = "capture/lastRegion";
 const auto kPickMode = "capture/pickMode";
 const auto kDefaultPattern = "guckste_%Y-%m-%d_%H-%M-%S";
@@ -293,6 +296,45 @@ void Preferences::setShowKeys(bool on)
     emit changed();
 }
 
+bool Preferences::stillsOnClicks() const
+{
+    return m_settings.value(kStillsOnClicks, false).toBool();
+}
+
+void Preferences::setStillsOnClicks(bool on)
+{
+    if (on == stillsOnClicks())
+        return;
+    m_settings.setValue(kStillsOnClicks, on);
+    emit changed();
+}
+
+bool Preferences::stillsOnChanges() const
+{
+    return m_settings.value(kStillsOnChanges, false).toBool();
+}
+
+void Preferences::setStillsOnChanges(bool on)
+{
+    if (on == stillsOnChanges())
+        return;
+    m_settings.setValue(kStillsOnChanges, on);
+    emit changed();
+}
+
+bool Preferences::stillsOnly() const
+{
+    return m_settings.value(kStillsOnly, false).toBool();
+}
+
+void Preferences::setStillsOnly(bool on)
+{
+    if (on == stillsOnly())
+        return;
+    m_settings.setValue(kStillsOnly, on);
+    emit changed();
+}
+
 bool Preferences::showKeysSupported() const
 {
     return KeyListener::supported();
@@ -328,6 +370,24 @@ void Preferences::setPickMode(const QString &mode)
 }
 
 QString Preferences::nextRecordingPath(const QString &suffix) const
+{
+    const QString folder = FileNaming::uniqueFolder(saveDirectory(),
+                                                    FileNaming::expand(filenamePattern(), QDateTime::currentDateTime()));
+    const QString name = QFileInfo(folder).fileName();
+    return folder + u'/' + name + u'.' + suffix;
+}
+
+QString Preferences::recordingFolder(const QString &name) const
+{
+    return saveDirectory() + u'/' + name;
+}
+
+QString Preferences::recordingVideoPath(const QString &name, const QString &suffix) const
+{
+    return FileNaming::uniqueFile(recordingFolder(name), name, suffix);
+}
+
+QString Preferences::nextVideoPath(const QString &suffix) const
 {
     return FileNaming::uniquePath(saveDirectory(), filenamePattern(), suffix);
 }

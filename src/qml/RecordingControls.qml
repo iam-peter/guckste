@@ -18,6 +18,8 @@ Window {
 
     readonly property rect region: recorder.region
     readonly property bool paused: recorder.state === ScreenRecorder.Paused
+    // The panel is under the region: its tooltips go under it too.
+    readonly property bool tipsBelow: y > region.y
 
     function clamp(value: real, low: real, high: real): real {
         return Math.max(low, Math.min(high, value))
@@ -136,6 +138,26 @@ Window {
                 elide: Text.ElideLeft
             }
             IconButton {
+                // Away from the region, out of the recording.
+                tipBelow: root.tipsBelow
+                objectName: "keepStill"
+                iconName: "camera"
+                tip: root.recorder.stillCount > 0
+                     ? qsTr("Keep this moment as a lossless still (%n kept)", "", root.recorder.stillCount)
+                     : qsTr("Keep this moment as a lossless still")
+                enabled: root.recorder.state === ScreenRecorder.Recording && !root.recorder.starting
+                palette.buttonText: Theme.panelText
+                onClicked: root.recorder.keepStill()
+            }
+            Label {
+                visible: root.recorder.stillCount > 0
+                text: root.recorder.stillCount
+                color: Theme.panelText
+                font.pixelSize: 12
+            }
+            IconButton {
+                // Away from the region, out of the recording.
+                tipBelow: root.tipsBelow
                 iconName: root.paused ? "play" : "pause"
                 tip: root.recorder.canPause ? (root.paused ? qsTr("Resume") : qsTr("Pause"))
                                             : qsTr("No pause while the microphone is recorded")
@@ -144,6 +166,9 @@ Window {
                 onClicked: root.paused ? root.recorder.resume() : root.recorder.pause()
             }
             IconButton {
+                // Away from the region, out of the recording.
+                tipBelow: root.tipsBelow
+                objectName: "stop"
                 iconName: "circle-stop"
                 tip: qsTr("Stop and save")
                 palette.buttonText: "#ff3b30"

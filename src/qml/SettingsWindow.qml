@@ -81,13 +81,29 @@ Window {
             checked: Preferences.showKeys
             onToggled: Preferences.showKeys = checked
         }
+        CheckBox {
+            visible: Preferences.showKeysSupported
+            text: qsTr("Keep lossless stills before and after each click while recording")
+            checked: Preferences.stillsOnClicks
+            onToggled: Preferences.stillsOnClicks = checked
+        }
+        CheckBox {
+            text: qsTr("Keep lossless stills of what the screen settles on after it changes")
+            checked: Preferences.stillsOnChanges
+            onToggled: Preferences.stillsOnChanges = checked
+        }
+        CheckBox {
+            text: qsTr("Keep only the stills of a recording, without the video")
+            checked: Preferences.stillsOnly
+            onToggled: Preferences.stillsOnly = checked
+        }
         Label {
             visible: Preferences.showKeysSupported && Qt.platform.os === "osx"
             Layout.fillWidth: true
             wrapMode: Text.WordWrap
             color: palette.placeholderText
             font.pixelSize: 12
-            text: qsTr("macOS asks for the Accessibility permission for that: System Settings → Privacy & Security.")
+            text: qsTr("macOS asks for the Accessibility permission for these: System Settings → Privacy & Security.")
         }
         CheckBox {
             text: qsTr("Copy the file path to the clipboard after saving")

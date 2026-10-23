@@ -4,6 +4,7 @@
 #include "core/Preferences.h"
 #include "core/ScreenCapture.h"
 #include "core/Encoding.h"
+#include "core/FileNaming.h"
 #include "core/ScreenRecorder.h"
 #include "core/VideoExporter.h"
 #include "core/VideoProbe.h"
@@ -41,12 +42,43 @@ App::App(QQmlEngine *engine, QObject *parent)
         if (m_recordingControls)
             m_recordingControls->close();
         if (Preferences::instance()->editAfterRecording()) {
-            openVideoEditor(path, true);
+            openVideoEditor(path, true, m_recorder->stills());
             return;
         }
         if (Preferences::instance()->copyPathAfterSave())
             QGuiApplication::clipboard()->setText(path);
         notify(tr("Recording saved"), QFileInfo(path).fileName());
+    });
+    connect(m_recorder, &ScreenRecorder::stillsFinished, this, [this](const QString &recorded) {
+        if (m_recordingControls)
+            m_recordingControls->close();
+        QList<Still> stills = m_recorder->stills();
+        // A video for the editor that failed leaves its stills among the
+        // temporary recordings: they go where recordings are kept.
+        QString directory = recorded;
+        if (directory.startsWith(temporaryRecordings() + u'/')) {
+            directory = FileNaming::uniqueFolder(Preferences::instance()->saveDirectory(),
+                                                 QFileInfo(recorded).fileName());
+            QDir().mkpath(directory);
+            for (Still &still : stills) {
+                const QString moved = QDir(directory).filePath(QFileInfo(still.path).fileName());
+                if (QFile::copy(still.path, moved))
+                    still.path = moved;
+            }
+            QDir(recorded).removeRecursively();
+        }
+        if (Preferences::instance()->copyPathAfterSave())
+            QGuiApplication::clipboard()->setText(directory);
+        notify(tr("Stills saved"), tr("%n still(s) in %1", "", int(stills.size())).arg(QFileInfo(directory).fileName()));
+        // In the editor as one picture, to go through the flow.
+        if (Preferences::instance()->editAfterRecording()) {
+            QList<std::pair<int, Still>> timed;
+            for (const Still &still : std::as_const(stills))
+                timed.append({still.ms, still});
+            int taken = 0;
+            showEditor(Document::sheetOf(timed, &taken));
+            noticeSheet(taken, int(timed.size()));
+        }
     });
     connect(m_recorder, &ScreenRecorder::errorOccurred, this,
             [this](const QString &message) { notify(tr("Recording failed"), message); });
@@ -89,6 +121,9 @@ void App::setupTray()
         m_trayMenuClosed.start();
         toggleRecording();
     });
+    m_stillAction = m_trayMenu->addAction(tr("Keep a Still"));
+    m_stillAction->setVisible(false);
+    connect(m_stillAction, &QAction::triggered, m_recorder, &ScreenRecorder::keepStill);
     auto *open = m_trayMenu->addAction(tr("Open Image…"));
     connect(open, &QAction::triggered, this, &App::openImage);
     m_trayMenu->addSeparator();
@@ -133,6 +168,8 @@ void App::handleCommand(const QString &command)
             openEditor(argument);
     } else if (verb == QStringLiteral("record")) {
         toggleRecording();
+    } else if (verb == QStringLiteral("still")) {
+        m_recorder->keepStill();
     } else if (verb == QStringLiteral("settings")) {
         openSettings();
     } else if (verb == QStringLiteral("quit")) {
@@ -436,12 +473,13 @@ void App::startRecording(const QRectF &region)
     // out, while what the overlay covered draws again.
     QTimer::singleShot(100, this, [this, rect] {
         Preferences *prefs = Preferences::instance();
-        // To the editor first, or straight into the folder.
+        // To the editor first, or straight into the folder; either way in
+        // a folder of its own, with its stills.
         QString path = prefs->nextRecordingPath(recordingSuffix());
-        if (prefs->editAfterRecording()) {
-            const QString dir = QStandardPaths::writableLocation(QStandardPaths::TempLocation)
-                                + QStringLiteral("/guckste-recordings");
-            path = dir + u'/' + QFileInfo(path).fileName();
+        if (prefs->editAfterRecording() && !prefs->stillsOnly()) {
+            const QFileInfo named(path);
+            const QString folder = FileNaming::uniqueFolder(temporaryRecordings(), named.dir().dirName());
+            path = folder + u'/' + named.fileName();
         }
         QDir().mkpath(QFileInfo(path).absolutePath());
         ScreenRecorder::Options options;
@@ -450,6 +488,9 @@ void App::startRecording(const QRectF &region)
         options.microphone = prefs->recordMicrophone();
         options.includeCursor = prefs->includeCursor();
         options.showKeys = prefs->showKeys();
+        options.stillsOnClicks = prefs->stillsOnClicks();
+        options.stillsOnChanges = prefs->stillsOnChanges();
+        options.video = !prefs->stillsOnly();
         if (!m_recorder->start(rect, path, options))
             return;
         m_recordingControls = createWindow(QStringLiteral("RecordingControls"),
@@ -472,6 +513,11 @@ void App::toggleRecording()
         captureForRecording();
     else
         stopRecording();
+}
+
+QString App::temporaryRecordings()
+{
+    return QStandardPaths::writableLocation(QStandardPaths::TempLocation) + QStringLiteral("/guckste-recordings");
 }
 
 QString App::recordingSuffix() const
@@ -502,6 +548,25 @@ void App::openFrame(Document *document)
         showEditor(document->frameDocument());
 }
 
+void App::openStills(Document *document, int fromMs, int toMs)
+{
+    if (!document)
+        return;
+    const int count = document->stillCount(fromMs, toMs);
+    if (count == 0)
+        return;
+    int taken = 0;
+    showEditor(document->stillsDocument(fromMs, toMs, &taken));
+    noticeSheet(taken, count);
+}
+
+void App::noticeSheet(int taken, int count)
+{
+    if (taken < count)
+        notify(tr("Stills"), tr("The first %1 of %2 stills, as many as one picture holds; trim the timeline to "
+                                "pick others.").arg(taken).arg(count));
+}
+
 bool App::fileExists(const QString &path) const
 {
     return QFileInfo::exists(path);
@@ -514,23 +579,28 @@ bool App::isVideoFile(const QString &path) const
     return suffixes.contains(QFileInfo(path).suffix().toLower());
 }
 
-void App::openVideoEditor(const QString &path, bool temporary)
+void App::openVideoEditor(const QString &path, bool temporary, const QList<Still> &stills)
 {
-    VideoProbe::probe(path, this, [this, path, temporary](const VideoInfo &video) {
+    VideoProbe::probe(path, this, [this, path, temporary, stills](const VideoInfo &video) {
         auto *document = new Document;
         if (document->addVideo(video, Document::Placement::Base) < 0) {
             delete document;
             notify(temporary ? tr("Recording saved") : tr("Could not open video"), path);
             return;
         }
-        QQuickWindow *editor = showEditor(document, {{QStringLiteral("temporaryVideo"), temporary ? path : QString()}});
-        // A recording is not kept unless it was saved by moving it, which
-        // clears the editor's temporaryVideo.
-        if (editor && temporary) {
-            connect(editor, &QWindow::visibleChanged, editor, [editor](bool visible) {
-                const QString left = editor->property("temporaryVideo").toString();
-                if (!visible && !left.isEmpty())
-                    QFile::remove(left);
+        document->addStills(path, stills);
+        // The folder the recording is saved into, named as it is.
+        const QString folder = QFileInfo(path).absolutePath();
+        QQuickWindow *editor = showEditor(document, {{QStringLiteral("temporaryVideo"), temporary ? path : QString()},
+                                                     {QStringLiteral("recordingName"),
+                                                      temporary ? QFileInfo(folder).fileName() : QString()}});
+        // A recording is not kept unless it was saved, which moves the
+        // video and copies the stills into its folder; what is left of it
+        // goes with the window.
+        if (editor && temporary && folder.startsWith(temporaryRecordings() + u'/')) {
+            connect(editor, &QWindow::visibleChanged, editor, [folder](bool visible) {
+                if (!visible)
+                    QDir(folder).removeRecursively();
             });
         }
     });
@@ -541,6 +611,8 @@ void App::updateTrayForRecording()
     const bool recording = m_recorder->state() != ScreenRecorder::Idle;
     if (m_recordAction)
         m_recordAction->setText(recording ? tr("Stop Recording") : tr("Record Screen…"));
+    if (m_stillAction)
+        m_stillAction->setVisible(recording);
     if (!m_tray)
         return;
     QIcon icon(QStringLiteral(":/qt/qml/Guckste/logo/guckste.svg"));

@@ -66,8 +66,10 @@ QString keyName(CGKeyCode code, bool shift)
 
 CGEventRef tapCallback(CGEventTapProxy, CGEventType type, CGEventRef event, void *refcon)
 {
-    if (type == kCGEventKeyDown) {
-        auto *listener = static_cast<KeyListener *>(refcon);
+    auto *listener = static_cast<KeyListener *>(refcon);
+    if (type == kCGEventLeftMouseDown || type == kCGEventRightMouseDown || type == kCGEventOtherMouseDown) {
+        emit listener->buttonPressed();
+    } else if (type == kCGEventKeyDown) {
         const auto code = CGKeyCode(CGEventGetIntegerValueField(event, kCGKeyboardEventKeycode));
         const CGEventFlags flags = CGEventGetFlags(event);
         const bool shift = flags & kCGEventFlagMaskShift;
@@ -83,10 +85,14 @@ CGEventRef tapCallback(CGEventTapProxy, CGEventType type, CGEventRef event, void
 
 } // namespace
 
-void runMacKeyTap(KeyListener *listener, std::atomic<bool> &stop)
+void runMacKeyTap(KeyListener *listener, std::atomic<bool> &stop, bool buttons)
 {
+    CGEventMask mask = CGEventMaskBit(kCGEventKeyDown);
+    if (buttons)
+        mask |= CGEventMaskBit(kCGEventLeftMouseDown) | CGEventMaskBit(kCGEventRightMouseDown)
+                | CGEventMaskBit(kCGEventOtherMouseDown);
     CFMachPortRef tap = CGEventTapCreate(kCGSessionEventTap, kCGHeadInsertEventTap, kCGEventTapOptionListenOnly,
-                                         CGEventMaskBit(kCGEventKeyDown), tapCallback, listener);
+                                         mask, tapCallback, listener);
     if (!tap)
         return;
     CFRunLoopSourceRef source = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0);

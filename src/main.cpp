@@ -42,6 +42,7 @@ int main(int argc, char *argv[])
                        "  full         Capture all screens to the clipboard and the screenshot folder\n"
                        "  open [file]  Open an image in the editor, asking for one without a file\n"
                        "  record       Pick a region to record, or stop the recording\n"
+                       "  still        While recording, keep the frame shown now as a lossless still\n"
                        "  settings     Open the settings\n"
                        "  quit         Quit the running instance\n\n"
                        "Without a command, Guckste starts in the tray. A command goes to the\n"
@@ -51,7 +52,7 @@ int main(int argc, char *argv[])
     QCommandLineOption replace(QStringLiteral("replace"),
                                QStringLiteral("Quit the running instance and take its place"));
     parser.addOption(replace);
-    parser.addPositionalArgument(QStringLiteral("command"), QStringLiteral("gui, full, open, record, settings or quit"));
+    parser.addPositionalArgument(QStringLiteral("command"), QStringLiteral("gui, full, open, record, still, settings or quit"));
     parser.addPositionalArgument(QStringLiteral("file"), QStringLiteral("Image to open"), QStringLiteral("[file]"));
     parser.process(app);
 

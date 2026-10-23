@@ -12,5 +12,9 @@ QString expand(const QString &pattern, const QDateTime &time);
 // name is taken.
 QString uniquePath(const QString &dir, const QString &pattern, const QString &suffix,
                    const QDateTime &time = QDateTime::currentDateTime());
+// The same for a name already expanded: dir/<base>.<suffix>.
+QString uniqueFile(const QString &dir, const QString &base, const QString &suffix);
+// dir/<base> for a folder of its own, -2, -3 … appended while taken.
+QString uniqueFolder(const QString &dir, const QString &base);
 
 } // namespace FileNaming

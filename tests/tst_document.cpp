@@ -635,6 +635,100 @@ private slots:
         QCOMPARE(still->render(1).pixelColor(30, 30), QColor(Qt::blue));
     }
 
+    // A recording's lossless stills, where its clip shows them: marks on
+    // the time that follow the clip, and in place of the decoded frame,
+    // the pointer painted in, or a layer of its own in a frame taken.
+    void findsStillsOnClips()
+    {
+        QTemporaryDir dir;
+        QImage green(40, 40, QImage::Format_RGB32);
+        green.fill(Qt::green);
+        QVERIFY(green.save(dir.filePath(u"01-before-click.png"_s)));
+        QImage pointer(4, 4, QImage::Format_ARGB32_Premultiplied);
+        pointer.fill(Qt::white);
+        Still before;
+        before.path = dir.filePath(u"01-before-click.png"_s);
+        before.ms = 500;
+        before.kind = Still::Kind::BeforeClick;
+        before.pointer = pointer;
+        before.pointerRect = QRectF(10, 10, 4, 4);
+        Still kept;
+        kept.path = dir.filePath(u"02-kept.png"_s);
+        kept.ms = 1500;
+
+        Document doc;
+        doc.addVideo(video(u"/v/rec.mp4"_s, QSize(40, 40), 2000, Qt::red), Document::Placement::Base);
+        doc.addStills(u"/v/rec.mp4"_s, {kept, before});
+        const QVariantList marks = doc.stillMarks();
+        QCOMPARE(marks.size(), 2);
+        QCOMPARE(marks[0].toMap()[u"time"_s].toInt(), 500);
+        QCOMPARE(marks[0].toMap()[u"kind"_s].toString(), u"before"_s);
+        QCOMPARE(marks[1].toMap()[u"time"_s].toInt(), 1500);
+        QCOMPARE(marks[1].toMap()[u"kind"_s].toString(), u"kept"_s);
+
+        doc.setTime(501);
+        QVERIFY(!doc.stillShown());
+        QCOMPARE(doc.clipImage(doc.annotations().first()).pixelColor(30, 30), QColor(Qt::red));
+        doc.setTime(500);
+        QVERIFY(doc.stillShown());
+        const QImage shown = doc.clipImage(doc.annotations().first());
+        QCOMPARE(shown.pixelColor(30, 30), QColor(Qt::green));
+        QCOMPARE(shown.pixelColor(11, 11), QColor(Qt::white));
+
+        std::unique_ptr<Document> frame(doc.frameDocument());
+        QCOMPARE(frame->annotationCount(), 2);
+        QCOMPARE(frame->annotations()[0].image.pixelColor(11, 11), QColor(Qt::green));
+        QCOMPARE(LayerModel::label(frame->annotations()[1]), u"Pointer"_s);
+        QCOMPARE(frame->annotations()[1].rect(), QRectF(10, 10, 4, 4));
+        QCOMPARE(frame->render(1).pixelColor(11, 11), QColor(Qt::white));
+
+        // After another clip, trimmed and moved: the stills go along.
+        Document two;
+        two.addVideo(video(u"/v/a.mp4"_s, QSize(40, 40), 1000, Qt::red), Document::Placement::Base);
+        two.addVideo(video(u"/v/rec.mp4"_s, QSize(40, 40), 2000, Qt::red), Document::Placement::After);
+        two.addStills(u"/v/rec.mp4"_s, {before, kept});
+        QCOMPARE(two.stillMarks()[0].toMap()[u"time"_s].toInt(), 1500);
+        two.setAnnotationTiming(1, 2000, 3000);
+        QCOMPARE(two.stillMarks().size(), 1);
+        QCOMPARE(two.stillMarks()[0].toMap()[u"time"_s].toInt(), 2500);
+        two.setAnnotationTiming(1, 2500, 3500);
+        QCOMPARE(two.stillMarks()[0].toMap()[u"time"_s].toInt(), 3000);
+        two.relinkSource(u"/v/rec.mp4"_s, u"/home/rec.mp4"_s);
+        QCOMPARE(two.stillMarks().size(), 1);
+
+        // Saved into a folder, as they are, and as one picture in rows,
+        // each with its pointer: the one of the kept still is missing.
+        QTemporaryDir saved;
+        QCOMPARE(doc.stillCount(0, 1000), 1);
+        QCOMPARE(doc.saveStills(saved.path(), 0, -1), 1);
+        QVERIFY(QFileInfo::exists(saved.filePath(u"01-before-click.png"_s)));
+        QCOMPARE(doc.saveStills(saved.path(), 0, -1), 1);
+        QVERIFY(!QFileInfo::exists(saved.filePath(u"01-before-click-2.png"_s)));
+        // Another recording's still of the name stays as it is.
+        QTemporaryDir other;
+        QImage blue(4, 4, QImage::Format_RGB32);
+        blue.fill(Qt::blue);
+        QVERIFY(blue.save(other.filePath(u"01-before-click.png"_s)));
+        QCOMPARE(doc.saveStills(other.path(), 0, -1), 1);
+        QCOMPARE(QImage(other.filePath(u"01-before-click.png"_s)).size(), QSize(4, 4));
+        QCOMPARE(QImage(other.filePath(u"01-before-click-2.png"_s)).size(), QSize(40, 40));
+        QVERIFY(green.save(dir.filePath(u"02-kept.png"_s)));
+        std::unique_ptr<Document> sheet(doc.stillsDocument(0, -1));
+        QCOMPARE(sheet->annotationCount(), 3);
+        QCOMPARE(LayerModel::label(sheet->annotations()[0]), u"1 · before a click at 0:00.5"_s);
+        QCOMPARE(LayerModel::label(sheet->annotations()[1]), u"Pointer"_s);
+        QCOMPARE(sheet->annotations()[2].rect(), QRectF(40 + 48, 0, 40, 40));
+        QCOMPARE(sheet->canvas(), QRect(0, 0, 128, 40));
+
+        // Added later, in their order of time.
+        Still change = kept;
+        change.ms = 1200;
+        change.kind = Still::Kind::Change;
+        doc.addStills(u"/v/rec.mp4"_s, {change});
+        QCOMPARE(doc.stillMarks().size(), 3);
+        QCOMPARE(doc.stillMarks()[1].toMap()[u"kind"_s].toString(), u"change"_s);
+    }
+
     // A recording saved by moving it: its clips play it from there.
     void relinksMovedVideos()
     {
@@ -694,6 +788,10 @@ private slots:
         QVERIFY(file.open(QIODevice::WriteOnly));
         file.close();
         QCOMPARE(FileNaming::uniquePath(dir.path(), u"shot"_s, u"png"_s, time), dir.path() + u"/shot-2.png"_s);
+        // A recording's folder, numbered the same way.
+        QCOMPARE(FileNaming::uniqueFolder(dir.path(), u"rec"_s), dir.path() + u"/rec"_s);
+        QVERIFY(QDir(dir.path()).mkdir(u"rec"_s));
+        QCOMPARE(FileNaming::uniqueFolder(dir.path(), u"rec"_s), dir.path() + u"/rec-2"_s);
     }
 };
 
