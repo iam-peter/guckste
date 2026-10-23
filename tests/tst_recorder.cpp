@@ -279,7 +279,8 @@ private slots:
         QCOMPARE(QImage(keeper.stills()[1].path).pixelColor(1, 1), QColor(Qt::black));
         QCOMPARE(QImage(keeper.stills().last().path).pixelColor(1, 1), QColor(Qt::yellow));
         // Beside the recording, in its folder.
-        QCOMPARE(ScreenRecorder::stillsDirectory(u"/a/Recording 1/Recording 1.mp4"_s), u"/a/Recording 1"_s);
+        QCOMPARE(ScreenRecorder::stillsDirectory(u"/a/Recording 1/Recording 1.mp4"_s),
+                 QFileInfo(u"/a/Recording 1"_s).absoluteFilePath());
     }
 
     // Without a click: what the screen settles on after a change as big
