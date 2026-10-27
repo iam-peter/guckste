@@ -9,6 +9,7 @@
 #include <QQmlEngine>
 #include <QtQml/qqmlregistration.h>
 
+#include <functional>
 #include <memory>
 
 class Document;
@@ -35,6 +36,9 @@ public:
     static App *create(QQmlEngine *, QJSEngine *);
 
     void setupTray();
+    // Calls `then` once the tray icon is on the panel, as far as can be
+    // told.
+    void whenTrayShown(std::function<void()> then);
     // Loads the overlay once while nothing else is going on.
     void warmUp();
     bool capturing() const { return m_overlay != nullptr; }

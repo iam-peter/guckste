@@ -95,7 +95,7 @@ int main(int argc, char *argv[])
     instance.listen();
 
     if (!command.isEmpty())
-        guckste.handleCommand(command);
+        guckste.whenTrayShown([&guckste, command] { guckste.handleCommand(command); });
     else
         QTimer::singleShot(300, &guckste, &App::warmUp);
     return app.exec();

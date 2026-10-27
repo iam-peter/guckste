@@ -14,6 +14,7 @@
 #include <QApplication>
 #include <QClipboard>
 #include <QCursor>
+#include <QDeadlineTimer>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -28,8 +29,42 @@
 #include <QSystemTrayIcon>
 #include <QTimer>
 
+#ifdef GUCKSTE_HAVE_DBUS
+#include <QDBusArgument>
+#include <QDBusConnection>
+#include <QDBusConnectionInterface>
+#include <QDBusMessage>
+#include <QDBusReply>
+#include <QDBusVariant>
+#endif
+
 namespace {
 App *s_instance = nullptr;
+
+#ifdef GUCKSTE_HAVE_DBUS
+// Whether the StatusNotifierWatcher lists a tray icon of this process.
+// Without a watcher to ask there is nothing to wait for either.
+bool trayListed()
+{
+    QDBusConnection bus = QDBusConnection::sessionBus();
+    QDBusMessage get = QDBusMessage::createMethodCall(QStringLiteral("org.kde.StatusNotifierWatcher"),
+                                                      QStringLiteral("/StatusNotifierWatcher"),
+                                                      QStringLiteral("org.freedesktop.DBus.Properties"),
+                                                      QStringLiteral("Get"));
+    get << QStringLiteral("org.kde.StatusNotifierWatcher") << QStringLiteral("RegisteredStatusNotifierItems");
+    const QDBusReply<QDBusVariant> items = bus.call(get, QDBus::Block, 200);
+    if (!items.isValid() || !bus.interface())
+        return true;
+    // Listed as "<bus name>/<path>"; Qt registers the icon from a
+    // connection of its own, so its process tells it apart.
+    for (const QString &item : qdbus_cast<QStringList>(items.value().variant())) {
+        const QDBusReply<uint> pid = bus.interface()->servicePid(item.section(u'/', 0, 0));
+        if (pid.isValid() && pid.value() == QCoreApplication::applicationPid())
+            return true;
+    }
+    return false;
+}
+#endif
 }
 
 App::App(QQmlEngine *engine, QObject *parent)
@@ -151,6 +186,29 @@ void App::setupTray()
             capture();
     });
     m_tray->show();
+}
+
+void App::whenTrayShown(std::function<void()> then)
+{
+#ifdef GUCKSTE_HAVE_DBUS
+    // A capture right at start would freeze the screen before the panel
+    // has drawn the icon. Once the watcher lists it, the panel asks this
+    // process for it, so that takes the event loop running a little.
+    if (m_tray && m_tray->isVisible()) {
+        auto *poll = new QTimer(this);
+        QDeadlineTimer deadline(2000);
+        connect(poll, &QTimer::timeout, this, [this, poll, deadline, then = std::move(then)] {
+            poll->setInterval(50);
+            if (!deadline.hasExpired() && !trayListed())
+                return;
+            poll->deleteLater();
+            QTimer::singleShot(150, this, then);
+        });
+        poll->start(0);
+        return;
+    }
+#endif
+    then();
 }
 
 void App::handleCommand(const QString &command)
