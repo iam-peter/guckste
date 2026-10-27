@@ -249,6 +249,12 @@ ApplicationWindow {
         marks.commitText()
         if (videoMode) {
             playback.pause()
+            // Asked for here, not bound: the first ask probes the encoder,
+            // which opening an editor should not wait for.
+            const suffix = App.recordingSuffix()
+            videoSaveDialog.nameFilters = [qsTr("Video (*.%1)").arg(suffix)]
+            videoSaveDialog.defaultSuffix = suffix
+            videoSaveDialog.selectedFile = "file://" + videoTarget()
             videoSaveDialog.open()
         } else {
             saveDialog.open()
@@ -995,10 +1001,7 @@ ApplicationWindow {
         id: videoSaveDialog
         title: qsTr("Save video")
         fileMode: FileDialog.SaveFile
-        nameFilters: [qsTr("Video (*.%1)").arg(App.recordingSuffix())]
-        defaultSuffix: App.recordingSuffix()
         currentFolder: "file://" + Preferences.saveDirectory
-        selectedFile: "file://" + root.videoTarget()
         onAccepted: root.saveVideo(selectedFile.toString().replace(/^file:\/\//, ""))
     }
 

@@ -442,6 +442,26 @@ private slots:
         qunsetenv("GUCKSTE_INSTANCE");
     }
 
+    void commandsSurviveNestedLoops()
+    {
+        // Opening the first editor spins an event loop while the sender of
+        // "open" has hung up already.
+        qputenv("GUCKSTE_INSTANCE", "test-" + QByteArray::number(QCoreApplication::applicationPid()));
+        SingleInstance instance;
+        QVERIFY(instance.claim());
+        QVERIFY(instance.listen());
+        QStringList received;
+        connect(&instance, &SingleInstance::commandReceived, this, [&received](const QString &command) {
+            received << command;
+            QTest::qWait(200);
+        });
+        QVERIFY(SingleInstance::sendToRunning(u"open"_s, 300));
+        QVERIFY(SingleInstance::sendToRunning(u"still"_s, 300));
+        QTRY_COMPARE(received, (QStringList{u"open"_s, u"still"_s}));
+        instance.release();
+        qunsetenv("GUCKSTE_INSTANCE");
+    }
+
     // Black and white stripes, 4 px wide, for blurring to show.
     static QString writeStripes(const QString &path, int frames)
     {

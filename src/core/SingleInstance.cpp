@@ -20,7 +20,11 @@ SingleInstance::SingleInstance(QObject *parent)
                     // The sender waits for this before it quits.
                     socket->write("ok\n");
                     socket->flush();
-                    emit commandReceived(command);
+                    // Handled once this returns: a handler that spins an
+                    // event loop would otherwise see the socket deleted
+                    // under this loop as the sender hangs up.
+                    QMetaObject::invokeMethod(this, [this, command] { emit commandReceived(command); },
+                                              Qt::QueuedConnection);
                 }
             });
             connect(socket, &QLocalSocket::disconnected, socket, &QObject::deleteLater);
