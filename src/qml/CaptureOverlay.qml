@@ -807,6 +807,28 @@ Window {
             checked: root.recordMode
             onClicked: root.record()
         }
+        // What the recording keeps as lossless stills besides: picked
+        // here for each recording, and remembered for the next.
+        IconButton {
+            objectName: "clickStills"
+            visible: root.addTarget === null && Preferences.showKeysSupported
+            iconName: "mouse-pointer-2"
+            checkable: true
+            checked: Preferences.stillsOnClicks
+            tip: checked ? qsTr("Recording keeps a still before and after each click (on)")
+                         : qsTr("Recording keeps a still before and after each click (off)")
+            onToggled: Preferences.stillsOnClicks = checked
+        }
+        IconButton {
+            objectName: "changeStills"
+            visible: root.addTarget === null
+            iconName: "square-dashed"
+            checkable: true
+            checked: Preferences.stillsOnChanges
+            tip: checked ? qsTr("Recording keeps a still when the screen settles after a change (on)")
+                         : qsTr("Recording keeps a still when the screen settles after a change (off)")
+            onToggled: Preferences.stillsOnChanges = checked
+        }
         IconButton {
             id: timerButton
             visible: root.addTarget === null

@@ -41,7 +41,7 @@ public:
     ScreenRecorder *recorder() const { return m_recorder; }
 
     // "gui": pick a region; "full": all screens to clipboard and file;
-    // "open <path>": the editor; "open": the editor with a file dialog;
+    // "open <path>": the editor on a file; "open": an empty editor;
     // "record": pick a region to record, or stop the recording; "still":
     // keep the frame recorded now as a lossless still.
     void handleCommand(const QString &command);
@@ -75,7 +75,8 @@ public:
     Q_INVOKABLE bool isVideoFile(const QString &path) const;
     Q_INVOKABLE bool fileExists(const QString &path) const;
     Q_INVOKABLE void captureFull();
-    Q_INVOKABLE void openImage();
+    // The editor with nothing in it yet, to open, paste or drop into.
+    Q_INVOKABLE void openEmptyEditor();
     Q_INVOKABLE bool openEditor(const QString &path);
     // Hands the overlay's document, cropped to the region, to a new editor.
     Q_INVOKABLE void editInWindow(Document *document, const QRectF &region);
@@ -110,7 +111,7 @@ private:
     std::unique_ptr<QMenu> m_trayMenu;
     QElapsedTimer m_trayMenuClosed;
     QAction *m_launchAtLogin = nullptr;
-    QAction *m_recordAction = nullptr;
+    QAction *m_stopAction = nullptr;
     QAction *m_stillAction = nullptr;
     ScreenRecorder *m_recorder = nullptr;
     QPointer<QQuickWindow> m_recordingControls;

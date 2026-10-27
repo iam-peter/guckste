@@ -162,14 +162,16 @@
     </div>
     <div class="way">
       <h3>Every click</h3>
-      <p>Turn on <em>Keep lossless stills before and after each click while
+      <p>Turn on the pointer button next to the record button in the picker,
+        or <em>Keep lossless stills before and after each click while
         recording</em> in the settings, and go through the flow as usual.
         Two stills come with each click.</p>
     </div>
     <div class="way">
       <h3>Every change</h3>
-      <p>Turn on <em>Keep lossless stills of what the screen settles on after
-        it changes</em>. No click needed: a tooltip, a hover highlight or a new
+      <p>Turn on the dashed square next to the record button, or <em>Keep
+        lossless stills of what the screen settles on after it changes</em> in
+        the settings. No click needed: a tooltip, a hover highlight or a new
         page each give a still once they have settled.</p>
     </div>
   </div>
@@ -258,8 +260,13 @@
     row lighting up under it, a page loading on its own. With this setting on,
     Guckste compares each frame with what the screen last settled on. When as
     many pixels as a tooltip covers have changed, it waits
-    until the screen stays the same for 0.3 seconds and keeps that frame, the
-    same way as the still after a click.</p>
+    until the screen stays the same for 0.2 seconds and keeps that frame, much
+    as the still after a click.</p>
+  <p>Menus are what this is made for: a menu opening gives a still once it is
+    all there, and each item the pointer rests on for a moment gives one of
+    its highlight, without a click. An item the pointer only passes over on
+    the way to another gives none, and closing the menu gives the screen as
+    it is again.</p>
   <ul class="rules">
     <li>Small changes don&rsquo;t count: a blinking caret or a ticking clock are
       too few pixels to keep a still, even both at once at opposite corners.
@@ -270,8 +277,9 @@
       the change it makes; there is no extra one.</li>
     <li>The pointer is not part of the picture, so moving it around keeps
       nothing by itself; only what the screen does in response.</li>
-    <li>No listening is needed, so it works on Wayland as well. Both settings
-      can be on together.</li>
+    <li>No listening is needed, so it works on Wayland as well. Both can be on
+      together, which suits a walk through a flow best: the clicks keep their
+      steps, the changes what happens between them.</li>
   </ul>
 
   <h2>Where they go</h2>

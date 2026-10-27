@@ -33,6 +33,8 @@ ApplicationWindow {
     property int trimEnd: -1
     readonly property int effectiveEnd: trimEnd < 0 ? playback.duration : Math.min(trimEnd, playback.duration)
     readonly property bool unsaved: document.modified || (temporaryVideo !== "" && !saved)
+    // Opened with nothing, from the tray or "guckste open".
+    readonly property bool empty: document.annotationCount === 0 && document.imageWidth === 0
     // The stills of the part kept.
     readonly property int keptStills: videoMode && document.revision >= 0
                                       ? document.stillCount(trimStart, effectiveEnd) : 0
@@ -671,6 +673,42 @@ ApplicationWindow {
                 }
             }
 
+            // An empty editor says what to do.
+            Column {
+                objectName: "emptyHint"
+                visible: root.empty
+                anchors.centerIn: flick
+                spacing: 14
+                Icon {
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    name: "image-plus"
+                    size: 40
+                    color: root.palette.placeholderText
+                }
+                Label {
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    horizontalAlignment: Text.AlignHCenter
+                    color: root.palette.placeholderText
+                    text: qsTr("Open an image or a video, paste one, or drop it here.")
+                }
+                Row {
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    spacing: 8
+                    Button {
+                        text: qsTr("Open… (Ctrl+O)")
+                        onClicked: openDialog.open()
+                    }
+                    Button {
+                        text: qsTr("Paste (Ctrl+V)")
+                        onClicked: root.addFromClipboard()
+                    }
+                    Button {
+                        text: qsTr("Capture the screen")
+                        onClicked: App.addScreenshotTo(root, root.document)
+                    }
+                }
+            }
+
             // Images dropped on the window are added, and videos after the
             // other clips.
             DropArea {
@@ -969,7 +1007,11 @@ ApplicationWindow {
         title: qsTr("Open image")
         nameFilters: [qsTr("Images and videos (*.png *.jpg *.jpeg *.bmp *.webp *.gif *.mp4 *.webm *.mkv *.avi *.mov)"), qsTr("All files (*)")]
         currentFolder: "file://" + Preferences.saveDirectory
-        onAccepted: App.openEditor(selectedFile.toString().replace(/^file:\/\//, ""))
+        onAccepted: {
+            // Opened in a window of its own; an empty editor gives way to it.
+            if (App.openEditor(decodeURIComponent(selectedFile.toString().replace(/^file:\/\//, ""))) && root.empty)
+                root.close()
+        }
     }
 
     Component {

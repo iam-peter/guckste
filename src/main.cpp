@@ -40,7 +40,7 @@ int main(int argc, char *argv[])
                        "Commands:\n"
                        "  gui          Pick a region of the screen to capture (default from a launcher)\n"
                        "  full         Capture all screens to the clipboard and the screenshot folder\n"
-                       "  open [file]  Open an image in the editor, asking for one without a file\n"
+                       "  open [file]  Open an image or video in the editor, an empty one without a file\n"
                        "  record       Pick a region to record, or stop the recording\n"
                        "  still        While recording, keep the frame shown now as a lossless still\n"
                        "  settings     Open the settings\n"

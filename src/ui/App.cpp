@@ -14,7 +14,6 @@
 #include <QApplication>
 #include <QClipboard>
 #include <QCursor>
-#include <QFileDialog>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -111,21 +110,22 @@ void App::setupTray()
     m_trayMenu = std::make_unique<QMenu>();
     // The menu may be drawn by the panel, over D-Bus, and close on its own
     // time with no aboutToHide here: picked from it, the capture waits.
-    auto *takeShot = m_trayMenu->addAction(tr("Take Screenshot"));
-    connect(takeShot, &QAction::triggered, this, [this] {
+    // One way in for screenshots and recordings: the overlay copies,
+    // saves or records the region picked.
+    auto *captureAction = m_trayMenu->addAction(tr("Capture Screen…"));
+    connect(captureAction, &QAction::triggered, this, [this] {
         m_trayMenuClosed.start();
         capture();
     });
-    m_recordAction = m_trayMenu->addAction(tr("Record Screen…"));
-    connect(m_recordAction, &QAction::triggered, this, [this] {
-        m_trayMenuClosed.start();
-        toggleRecording();
-    });
+    // While recording, what a recording needs.
+    m_stopAction = m_trayMenu->addAction(tr("Stop Recording"));
+    m_stopAction->setVisible(false);
+    connect(m_stopAction, &QAction::triggered, this, &App::stopRecording);
     m_stillAction = m_trayMenu->addAction(tr("Keep a Still"));
     m_stillAction->setVisible(false);
     connect(m_stillAction, &QAction::triggered, m_recorder, &ScreenRecorder::keepStill);
-    auto *open = m_trayMenu->addAction(tr("Open Image…"));
-    connect(open, &QAction::triggered, this, &App::openImage);
+    auto *open = m_trayMenu->addAction(tr("Open Editor"));
+    connect(open, &QAction::triggered, this, &App::openEmptyEditor);
     m_trayMenu->addSeparator();
     if (Preferences::instance()->launchAtLoginSupported()) {
         m_launchAtLogin = m_trayMenu->addAction(tr("Launch at Login"));
@@ -163,7 +163,7 @@ void App::handleCommand(const QString &command)
         captureFull();
     } else if (verb == QStringLiteral("open")) {
         if (argument.isEmpty())
-            openImage();
+            openEmptyEditor();
         else
             openEditor(argument);
     } else if (verb == QStringLiteral("record")) {
@@ -377,14 +377,9 @@ void App::captureFull()
     });
 }
 
-void App::openImage()
+void App::openEmptyEditor()
 {
-    const QString start = Preferences::instance()->saveDirectory();
-    const QString path = QFileDialog::getOpenFileName(
-        nullptr, tr("Open Image"), QFileInfo::exists(start) ? start : QString(),
-        tr("Images and videos (*.png *.jpg *.jpeg *.bmp *.webp *.gif *.mp4 *.webm *.mkv *.avi *.mov);;All files (*)"));
-    if (!path.isEmpty())
-        openEditor(path);
+    showEditor(new Document);
 }
 
 bool App::openEditor(const QString &path)
@@ -609,8 +604,8 @@ void App::openVideoEditor(const QString &path, bool temporary, const QList<Still
 void App::updateTrayForRecording()
 {
     const bool recording = m_recorder->state() != ScreenRecorder::Idle;
-    if (m_recordAction)
-        m_recordAction->setText(recording ? tr("Stop Recording") : tr("Record Screen…"));
+    if (m_stopAction)
+        m_stopAction->setVisible(recording);
     if (m_stillAction)
         m_stillAction->setVisible(recording);
     if (!m_tray)

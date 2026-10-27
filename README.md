@@ -39,9 +39,10 @@ Put `nightly` in place of `stable` for the nightly builds.
 
 ## Using it
 
-`guckste` starts in the tray. The tray menu takes a screenshot, opens an
-image in the editor, records the screen, switches launching at login on
-and off, and opens the settings. There is
+`guckste` starts in the tray. The tray menu captures the screen, for a
+screenshot or a recording alike, opens the editor, switches launching at
+login on and off, and opens the settings; while recording it also stops
+the recording and keeps a still. There is
 one Guckste per user: it holds a lock file, and started again, `guckste`
 hands its command to the running instance and quits (`guckste --replace`
 quits the running one and takes its place, for a new build):
@@ -56,8 +57,8 @@ quits the running one and takes its place, for a new build):
   is running. Bound to a key, one key starts and stops.
 - `guckste still` — while recording, keep the frame shown now as a
   lossless still (see Stills).
-- `guckste open [file]` — the editor, with a file dialog when no file is
-  given.
+- `guckste open [file]` — the editor on an image or a video, or an empty
+  one to open, paste or drop into when no file is given.
 - `guckste settings`, `guckste quit`.
 
 ### Picking a region
@@ -101,8 +102,8 @@ it:
 
 ### Recording
 
-Shift+Enter, the camera button, `guckste record` or the tray's Record
-Screen… record the region to a video. A red frame marks the region and a
+Shift+Enter or the video button in the picker, or `guckste record`,
+record the region to a video. A red frame marks the region and a
 small panel outside it shows the time, with pause and stop; the panel can
 be dragged anywhere. Neither is in the recording. When a whole screen is
 recorded there is no panel: the tray menu's Stop Recording or `guckste
@@ -204,11 +205,18 @@ still is not kept twice. Clicks are heard as keys are, so not on Wayland.
 "Keep lossless stills of what the screen settles on after it changes"
 needs no click: when as many pixels as a tooltip covers (1200) differ
 from where the screen last settled, the frame it settles on, the same for
-0.3 seconds, is kept; a blinking caret or a clock's digits are too few
+0.2 seconds, is kept; a blinking caret or a clock's digits are too few
 to count, however far apart. A change that keeps moving is
 kept every 4 seconds, and a click's own stills stand for the change it
 makes. It works everywhere, Wayland too, and catches what only hovering
-shows, a tooltip or a highlighted row.
+shows: a menu opening, then each item the pointer rests on for a moment,
+highlighted, while an item only passed over is not; a tooltip; a
+highlighted row.
+
+Both can be on together, and both are picked for each recording too:
+in the picker, after the record button, the pointer button turns the
+click stills on and off and the dashed square the change stills; the
+settings remember what was picked last.
 
 The stills are without the pointer, which is kept beside them. In the
 editor they are marks on the timeline: a click close by or Ctrl+. and
@@ -232,6 +240,11 @@ editor off after recording, leaves them in the folder. A video that
 fails to record keeps its stills the same way.
 
 ### The editor
+
+Opened from the tray's Open Editor or `guckste open`, the editor starts
+empty and says what to do: open an image or a video (Ctrl+O), paste one,
+drop one on it, or capture the screen into it. Opening a file there
+opens it in place of the empty editor.
 
 The editor shows a screenshot at any zoom from 25 % to 3200 %, each pixel
 a crisp block from 100 % up and a grid between them from 800 % (G toggles

@@ -327,8 +327,8 @@ private slots:
         const int whole = ms;
         show(with(tooltip, Qt::black), 1000);
         QCOMPARE(kindsOf(keeper.stills()), QList({Change}));
-        QVERIFY(keeper.stills()[0].ms >= whole + StillKeeper::settleMs);
-        QVERIFY(keeper.stills()[0].ms < whole + StillKeeper::settleMs + 33);
+        QVERIFY(keeper.stills()[0].ms >= whole + StillKeeper::changeSettleMs);
+        QVERIFY(keeper.stills()[0].ms < whole + StillKeeper::changeSettleMs + 33);
         keeper.finish();
         QCOMPARE(QImage(keeper.stills()[0].path).pixelColor(tooltip.center()), QColor(Qt::black));
 
@@ -365,6 +365,62 @@ private slots:
 
         QCOMPARE(StillKeeper::changedPixels(page, with(QRect(5, 6, 7, 8), Qt::red)), 56);
         QCOMPARE(StillKeeper::changedPixels(page, page), 0);
+    }
+
+    // A menu walked through without clicking, as when showing a flow: one
+    // still when it has opened, one for each item the pointer rests on,
+    // none for one it only passes over, and one when it closes.
+    void keepsStillsOfMenus()
+    {
+        QTemporaryDir dir;
+        StillKeeper keeper;
+        keeper.setKeepChanges(true);
+        keeper.begin(dir.filePath(u"menu stills"_s));
+        QImage page(640, 400, QImage::Format_RGB32);
+        page.fill(QColor(0xf0, 0xf0, 0xf0));
+        const QRect menu(100, 60, 180, 6 * 24);
+        const auto menuWith = [&](qreal opacity, int hovered) {
+            QImage image = page;
+            QPainter p(&image);
+            p.setOpacity(opacity);
+            p.fillRect(menu, Qt::white);
+            for (int i = 0; i < 6; ++i) {
+                const QRect row(menu.x(), menu.y() + i * 24, menu.width(), 24);
+                if (i == hovered)
+                    p.fillRect(row, QColor(0x30, 0x8c, 0xe8));
+                p.fillRect(row.adjusted(10, 8, -60, -8), i == hovered ? Qt::white : Qt::black);
+            }
+            return image;
+        };
+        int ms = 0;
+        const auto show = [&](const QImage &image, int forMs) {
+            for (const int until = ms + forMs; ms < until; ms += 16) {
+                StillKeeper::Frame frame;
+                frame.image = image;
+                frame.ms = ms;
+                keeper.frame(frame);
+            }
+        };
+        show(page, 500);
+        // Fading in over 150 ms, then shown.
+        for (const qreal opacity : {0.2, 0.4, 0.6, 0.8})
+            show(menuWith(opacity, -1), 40);
+        show(menuWith(1, -1), 500);
+        QCOMPARE(keeper.stills().size(), 1);
+        // Rested on the first item, then a quarter second on the second.
+        show(menuWith(1, 0), 450);
+        show(menuWith(1, 1), 250);
+        QCOMPARE(keeper.stills().size(), 3);
+        // Passed over the third on the way to the fourth.
+        show(menuWith(1, 2), 100);
+        show(menuWith(1, 3), 450);
+        QCOMPARE(keeper.stills().size(), 4);
+        // Closed.
+        show(page, 500);
+        QCOMPARE(keeper.stills().size(), 5);
+        keeper.finish();
+        QCOMPARE(QImage(keeper.stills()[3].path).pixelColor(menu.x() + 2, menu.y() + 3 * 24 + 2),
+                 QColor(0x30, 0x8c, 0xe8));
     }
 
     void oneInstanceAtATime()

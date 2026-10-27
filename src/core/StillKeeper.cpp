@@ -83,7 +83,7 @@ void StillKeeper::followChanges(const Frame &frame)
         return;
     }
     if (m_latest.image.isNull() || frame.image == m_latest.image) {
-        if (m_changing && frame.ms - m_lastMoveMs >= settleMs) {
+        if (m_changing && frame.ms - m_lastMoveMs >= changeSettleMs) {
             m_changing = false;
             if (isBig(m_settled, frame.image))
                 add(frame, Still::Kind::Change);

@@ -46,6 +46,9 @@ public:
 
     // How long the screen stays as it is to count as settled.
     static constexpr int settleMs = 300;
+    // The same without a click, shorter: the pointer resting a moment on
+    // a menu item is worth a still of its highlight.
+    static constexpr int changeSettleMs = 200;
     // How long a click may take to change anything; after that it did not.
     static constexpr int waitForChangeMs = 2000;
     // The longest wait for the screen to settle, as while a video plays.

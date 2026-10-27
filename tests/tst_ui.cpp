@@ -669,6 +669,42 @@ private slots:
 
     // All screens and Previous are kept like the other modes and open with
     // their region selected; switching the mode drops it again.
+    // Next to the record button: which stills a recording keeps, toggled
+    // there and kept in the settings.
+    void overlayPicksStills()
+    {
+        Preferences *prefs = Preferences::instance();
+        prefs->setStillsOnChanges(false);
+        auto *document = new Document;
+        document->setImage(demoScreen(1280, 800));
+        QQmlComponent component(m_engine);
+        component.loadFromModule("Guckste", "CaptureOverlay");
+        auto *window = qobject_cast<QQuickWindow *>(component.createWithInitialProperties(
+            {{u"document"_s, QVariant::fromValue(document)}, {u"screenGeometry"_s, QRect(0, 0, 1280, 800)}}));
+        QVERIFY2(window, qPrintable(component.errorString()));
+        document->setParent(window);
+        window->show();
+        QVERIFY(QTest::qWaitForWindowExposed(window));
+        QMetaObject::invokeMethod(window, "setSelection", Q_ARG(double, 200), Q_ARG(double, 150), Q_ARG(double, 400),
+                                  Q_ARG(double, 300));
+        auto *changes = window->findChild<QQuickItem *>(u"changeStills"_s);
+        auto *clicks = window->findChild<QQuickItem *>(u"clickStills"_s);
+        QVERIFY(changes && clicks);
+        QTRY_VERIFY(changes->isVisible());
+        // Offscreen has no clicks to listen to.
+        QCOMPARE(clicks->isVisible(), prefs->showKeysSupported());
+        QVERIFY(!changes->property("checked").toBool());
+        const QPoint middle = changes->mapToScene(QPointF(changes->width() / 2, changes->height() / 2)).toPoint();
+        QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier, middle);
+        QTRY_VERIFY(prefs->stillsOnChanges());
+        QVERIFY(changes->property("checked").toBool());
+        saveScreenshot(window, u"overlay-stills"_s);
+        QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier, middle);
+        QTRY_VERIFY(!prefs->stillsOnChanges());
+        window->close();
+        delete window;
+    }
+
     void pickModesAreKept()
     {
         Preferences *prefs = Preferences::instance();
@@ -1750,6 +1786,36 @@ private slots:
         window->close();
         QTRY_VERIFY(!window->isVisible());
         delete window;
+    }
+
+    // Opened with nothing: it says what to do, until there is something.
+    void emptyEditorInvites()
+    {
+        const QList<QWindow *> others = QGuiApplication::topLevelWindows();
+        m_app->openEmptyEditor();
+        QQuickWindow *window = nullptr;
+        QTRY_VERIFY((window = [&]() -> QQuickWindow * {
+            for (QWindow *w : QGuiApplication::topLevelWindows()) {
+                if (!others.contains(w) && w->property("videoMode").isValid() && w->isVisible())
+                    return qobject_cast<QQuickWindow *>(w);
+            }
+            return nullptr;
+        }()));
+        QVERIFY(QTest::qWaitForWindowExposed(window));
+        auto *hint = window->findChild<QQuickItem *>(u"emptyHint"_s);
+        QVERIFY(hint);
+        QVERIFY(window->property("empty").toBool());
+        QVERIFY(hint->isVisible());
+        QTest::qWait(50);
+        saveScreenshot(window, u"editor-empty"_s);
+        auto *document = window->property("document").value<Document *>();
+        QImage image(120, 80, QImage::Format_RGB32);
+        image.fill(Qt::darkCyan);
+        document->addImage(image, 0, 0);
+        QTRY_VERIFY(!hint->isVisible());
+        QVERIFY(!window->property("empty").toBool());
+        window->setProperty("discardConfirmed", true);
+        window->close();
     }
 
     // A video added to a screenshot: the editor turns to one for video.
