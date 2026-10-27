@@ -23,12 +23,15 @@
 #include <QGuiApplication>
 #include <QPainter>
 #include <QProcess>
+#include <QScopeGuard>
 #include <QSignalSpy>
 #include <QMimeType>
 #include <QTest>
 #include <QVideoFrame>
 
+#include <atomic>
 #include <cmath>
+#include <thread>
 
 using namespace Qt::StringLiterals;
 
@@ -455,9 +458,19 @@ private slots:
             received << command;
             QTest::qWait(200);
         });
-        QVERIFY(SingleInstance::sendToRunning(u"open"_s, 300));
-        QVERIFY(SingleInstance::sendToRunning(u"still"_s, 300));
+        // Sent from a thread of its own, as another process would, waiting
+        // for each to be taken: a socket of this thread is read only after
+        // it has closed, and on Windows its unsent command closes with it.
+        std::atomic<int> sent = 0;
+        std::thread sender([&sent] {
+            sent += SingleInstance::sendToRunning(u"open"_s);
+            sent += SingleInstance::sendToRunning(u"still"_s);
+        });
+        auto joined = qScopeGuard([&sender] { sender.join(); });
         QTRY_COMPARE(received, (QStringList{u"open"_s, u"still"_s}));
+        joined.dismiss();
+        sender.join();
+        QCOMPARE(sent, 2);
         instance.release();
         qunsetenv("GUCKSTE_INSTANCE");
     }
