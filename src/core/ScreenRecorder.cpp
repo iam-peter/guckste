@@ -21,13 +21,21 @@
 ScreenRecorder::ScreenRecorder(QObject *parent)
     : QObject(parent)
 {
-    m_captureSession.setVideoSink(&m_sink);
-    connect(&m_sink, &QVideoSink::videoFrameChanged, this, &ScreenRecorder::onFrame);
+}
 
-    m_encodeSession.setVideoFrameInput(&m_input);
-    m_encodeSession.setRecorder(&m_recorder);
-    connect(&m_recorder, &QMediaRecorder::durationChanged, this, &ScreenRecorder::durationChanged);
-    connect(&m_recorder, &QMediaRecorder::errorOccurred, this,
+ScreenRecorder::Media &ScreenRecorder::media()
+{
+    if (m_media)
+        return *m_media;
+    m_media = std::make_unique<Media>();
+    QMediaRecorder &recorder = m_media->recorder;
+    m_media->captureSession.setVideoSink(&m_media->sink);
+    connect(&m_media->sink, &QVideoSink::videoFrameChanged, this, &ScreenRecorder::onFrame);
+
+    m_media->encodeSession.setVideoFrameInput(&m_media->input);
+    m_media->encodeSession.setRecorder(&recorder);
+    connect(&recorder, &QMediaRecorder::durationChanged, this, &ScreenRecorder::durationChanged);
+    connect(&recorder, &QMediaRecorder::errorOccurred, this,
             [this](QMediaRecorder::Error, const QString &message) {
                 // Can arrive from inside record(); stopping waits until
                 // start() is through.
@@ -35,10 +43,11 @@ ScreenRecorder::ScreenRecorder(QObject *parent)
                 emit errorOccurred(message);
                 QTimer::singleShot(0, this, &ScreenRecorder::stop);
             });
-    connect(&m_recorder, &QMediaRecorder::recorderStateChanged, this, [this](QMediaRecorder::RecorderState state) {
+    connect(&recorder, &QMediaRecorder::recorderStateChanged, this, [this](QMediaRecorder::RecorderState state) {
         if (state == QMediaRecorder::StoppedState && m_state != Idle)
             finish();
     });
+    return *m_media;
 }
 
 ScreenRecorder::~ScreenRecorder()
@@ -67,7 +76,7 @@ bool ScreenRecorder::startCapture(QScreen *preferred)
     for (QScreen *screen : std::as_const(screens)) {
         auto capture = std::make_unique<QScreenCapture>();
         capture->setScreen(screen);
-        m_captureSession.setScreenCapture(capture.get());
+        media().captureSession.setScreenCapture(capture.get());
         capture->start();
         if (capture->error() == QScreenCapture::NoError && capture->isActive()) {
             m_screenCapture = std::move(capture);
@@ -82,7 +91,7 @@ bool ScreenRecorder::startCapture(QScreen *preferred)
             return true;
         }
         lastError = capture->errorString();
-        m_captureSession.setScreenCapture(nullptr);
+        media().captureSession.setScreenCapture(nullptr);
     }
     emit errorOccurred(lastError.isEmpty() ? tr("The screen cannot be captured") : lastError);
     return false;
@@ -127,9 +136,9 @@ bool ScreenRecorder::start(const QRect &region, const QString &path, const Optio
     m_stillsMs = 0;
     if (options.microphone && options.video) {
         m_audio = std::make_unique<QAudioInput>();
-        m_encodeSession.setAudioInput(m_audio.get());
+        media().encodeSession.setAudioInput(m_audio.get());
     } else {
-        m_encodeSession.setAudioInput(nullptr);
+        media().encodeSession.setAudioInput(nullptr);
         m_audio.reset();
     }
     if ((options.showKeys || options.stillsOnClicks) && KeyListener::supported()) {
@@ -152,13 +161,13 @@ bool ScreenRecorder::start(const QRect &region, const QString &path, const Optio
     QMediaFormat format = Encoding::bestFormat();
     if (!options.microphone)
         format.setAudioCodec(QMediaFormat::AudioCodec::Unspecified);
-    m_recorder.setMediaFormat(format);
-    m_recorder.setVideoFrameRate(options.frameRate);
+    media().recorder.setMediaFormat(format);
+    media().recorder.setVideoFrameRate(options.frameRate);
     const QSize size(qRound(m_region.width() * m_devicePixelRatio) & ~1,
                      qRound(m_region.height() * m_devicePixelRatio) & ~1);
-    m_recorder.setVideoResolution(size);
-    Encoding::apply(m_recorder, size, options.frameRate, options.quality);
-    m_recorder.setOutputLocation(QUrl::fromLocalFile(path));
+    media().recorder.setVideoResolution(size);
+    Encoding::apply(media().recorder, size, options.frameRate, options.quality);
+    media().recorder.setOutputLocation(QUrl::fromLocalFile(path));
     if (!options.video)
         QDir().mkpath(QFileInfo(path).absolutePath());
 
@@ -181,7 +190,7 @@ void ScreenRecorder::beginEncoding()
     emit outputPathChanged();
     if (m_state != Recording || !m_options.video)
         return;
-    m_recorder.record();
+    media().recorder.record();
     if (m_failed)
         stop();
 }
@@ -259,7 +268,7 @@ void ScreenRecorder::onFrame(const QVideoFrame &frame)
         if (out.endTime() >= 0)
             out.setEndTime(out.endTime() - m_pausedTotal);
     }
-    m_input.sendVideoFrame(out);
+    media().input.sendVideoFrame(out);
 }
 
 void ScreenRecorder::pause()
@@ -291,10 +300,10 @@ void ScreenRecorder::stop()
     setState(Stopping);
     if (m_screenCapture)
         m_screenCapture->stop();
-    if (m_recorder.recorderState() == QMediaRecorder::StoppedState)
+    if (media().recorder.recorderState() == QMediaRecorder::StoppedState)
         finish();
     else
-        m_recorder.stop();
+        media().recorder.stop();
 }
 
 void ScreenRecorder::keepStill()
@@ -329,13 +338,13 @@ QStringList ScreenRecorder::recentKeys() const
 
 void ScreenRecorder::finish()
 {
-    m_captureSession.setScreenCapture(nullptr);
+    media().captureSession.setScreenCapture(nullptr);
     m_screenCapture.reset();
     if (m_keyListener) {
         m_keyListener->end();
         m_keyListener.reset();
     }
-    m_encodeSession.setAudioInput(nullptr);
+    media().encodeSession.setAudioInput(nullptr);
     m_audio.reset();
     m_stills.finish();
     emit stillsChanged();
@@ -349,8 +358,8 @@ void ScreenRecorder::finish()
         emit stillsFinished(m_stills.directory());
         return;
     }
-    const QString path = m_recorder.actualLocation().isLocalFile() ? m_recorder.actualLocation().toLocalFile()
-                                                                    : m_outputPath;
+    const QUrl location = media().recorder.actualLocation();
+    const QString path = location.isLocalFile() ? location.toLocalFile() : m_outputPath;
     if (m_failed || QFileInfo(path).size() == 0) {
         // No video worth keeping; the stills are whole all the same.
         QFile::remove(path);

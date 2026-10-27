@@ -382,6 +382,7 @@ void App::warmUp()
                                           {QStringLiteral("screenGeometry"), QRect(0, 0, 16, 16)}});
     delete overlay;
     delete document;
+    m_recorder->prepare();
 }
 
 void App::captureLater(int seconds, const QRectF &region, bool recordMode)

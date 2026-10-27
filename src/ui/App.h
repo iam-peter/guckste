@@ -39,7 +39,8 @@ public:
     // Calls `then` once the tray icon is on the panel, as far as can be
     // told.
     void whenTrayShown(std::function<void()> then);
-    // Loads the overlay once while nothing else is going on.
+    // Loads the overlay and starts Qt Multimedia once while nothing else
+    // is going on.
     void warmUp();
     bool capturing() const { return m_overlay != nullptr; }
     ScreenRecorder *recorder() const { return m_recorder; }

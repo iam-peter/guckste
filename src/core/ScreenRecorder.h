@@ -50,9 +50,12 @@ public:
     explicit ScreenRecorder(QObject *parent = nullptr);
     ~ScreenRecorder() override;
 
+    // Starts Qt Multimedia ahead of the first recording.
+    void prepare() { media(); }
+
     State state() const { return m_state; }
     // Milliseconds recorded, pauses left out.
-    qint64 duration() const { return m_options.video ? m_recorder.duration() : m_stillsMs; }
+    qint64 duration() const { return m_options.video && m_media ? m_media->recorder.duration() : m_stillsMs; }
     // The region in logical screen coordinates, as it is recorded.
     QRect region() const { return m_region; }
     bool wholeScreen() const { return m_wholeScreen; }
@@ -152,12 +155,19 @@ private:
     QElapsedTimer m_pauseTimer;
 
     std::unique_ptr<QScreenCapture> m_screenCapture;
-    QMediaCaptureSession m_captureSession;
-    QVideoSink m_sink;
+    // Made for the first recording: starting Qt Multimedia takes a fifth
+    // of a second, which a screenshot at start should not wait for.
+    struct Media
+    {
+        QMediaCaptureSession captureSession;
+        QVideoSink sink;
 
-    QMediaCaptureSession m_encodeSession;
-    QVideoFrameInput m_input;
-    QMediaRecorder m_recorder;
+        QMediaCaptureSession encodeSession;
+        QVideoFrameInput input;
+        QMediaRecorder recorder;
+    };
+    Media &media();
+    std::unique_ptr<Media> m_media;
     std::unique_ptr<QAudioInput> m_audio;
     std::unique_ptr<KeyListener> m_keyListener;
     KeyOverlay m_keys;
