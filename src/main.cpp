@@ -38,7 +38,7 @@ int main(int argc, char *argv[])
     parser.setApplicationDescription(
         QStringLiteral("Screenshot tool with annotations and pixel measurements.\n\n"
                        "Commands:\n"
-                       "  gui          Pick a region of the screen to capture (default from a launcher)\n"
+                       "  gui          Pick a region of the screen to capture (the default when running)\n"
                        "  full         Capture all screens to the clipboard and the screenshot folder\n"
                        "  open [file]  Open an image or video in the editor, an empty one without a file\n"
                        "  record       Pick a region to record, or stop the recording\n"
