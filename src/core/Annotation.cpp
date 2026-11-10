@@ -1,6 +1,7 @@
 #include "Annotation.h"
 
 #include <QLineF>
+#include <QPainterPath>
 #include <QPolygonF>
 #include <cmath>
 
@@ -23,6 +24,14 @@ QRectF Annotation::geometryBounds() const
     case Type::Text:
     case Type::Counter:
         return QRectF(points.first(), QSizeF(0, 0));
+    case Type::Line:
+    case Type::Arrow:
+        if (bends()) {
+            QPainterPath curve(points[0]);
+            curve.quadTo(points[2], points[1]);
+            return curve.boundingRect();
+        }
+        return rect();
     default:
         return rect();
     }
@@ -45,6 +54,8 @@ bool Annotation::isEmpty() const
         return points.isEmpty();
     case Type::Line:
     case Type::Arrow:
+        // Bent into a loop, its ends may meet.
+        return points.size() < 2 || (QLineF(points[0], points[1]).length() < 1 && !bends());
     case Type::Measure:
         return points.size() < 2 || QLineF(points[0], points[1]).length() < 1;
     case Type::Rectangle:
@@ -63,6 +74,25 @@ bool Annotation::isEmpty() const
 bool Annotation::hasEndPoints() const
 {
     return type == Type::Line || type == Type::Arrow || type == Type::Measure;
+}
+
+QPointF Annotation::bendHandle() const
+{
+    if (points.size() < 2)
+        return points.value(0);
+    const QPointF straight = (points[0] + points[1]) / 2;
+    // A quadratic curve's middle is halfway from there to the control point.
+    return bends() ? (straight + points[2]) / 2 : straight;
+}
+
+void Annotation::bendThrough(const QPointF &p)
+{
+    if (!canBend() || points.size() < 2)
+        return;
+    const QPointF straight = (points[0] + points[1]) / 2;
+    points.resize(2);
+    if (QLineF(straight, p).length() >= 2)
+        points << 2 * p - straight;
 }
 
 bool Annotation::hasBox() const

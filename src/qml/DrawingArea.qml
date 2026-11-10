@@ -140,7 +140,7 @@ Item {
     }
 
     function handleCursor(handle: int): int {
-        if (handlePoints.length === 2)
+        if (handlePoints.length < 8)
             return Qt.SizeAllCursor
         switch (handle) {
         case 0: case 4: return Qt.SizeFDiagCursor
@@ -361,7 +361,8 @@ Item {
         }
     }
 
-    // Where the selected mark can be reshaped.
+    // Where the selected mark can be reshaped: round for the ends and the
+    // bend of a line, square on the eight points of a box.
     Repeater {
         model: mouse.mode === "draw" ? 0 : area.handlePoints.length
         Rectangle {
@@ -371,7 +372,7 @@ Item {
             y: (at.y - area.originY) * area.zoom - height / 2
             width: 9
             height: 9
-            radius: area.handlePoints.length === 2 ? 4.5 : 0
+            radius: area.handlePoints.length < 8 ? 4.5 : 0
             color: "white"
             border.color: "#a0000000"
             border.width: 1

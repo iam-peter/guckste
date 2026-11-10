@@ -513,6 +513,8 @@ QVariantList Document::handlePoints(int index) const
     QVariantList points;
     if (a.hasEndPoints() && a.points.size() >= 2) {
         points << a.points[0] << a.points[1];
+        if (a.canBend())
+            points << a.bendHandle();
     } else if (a.hasBox() && a.points.size() >= 2) {
         const QRectF r = a.rect();
         const qreal cx = r.center().x(), cy = r.center().y();
@@ -556,6 +558,11 @@ void Document::dragHandle(int handle, qreal x, qreal y, int modifiers)
             p = constrainAngle(other, p);
         }
         a.points[handle] = p;
+        emit changed();
+        return;
+    }
+    if (a.canBend() && handle == 2) {
+        a.bendThrough(p);
         emit changed();
         return;
     }

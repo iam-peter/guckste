@@ -87,7 +87,13 @@ void AnnotationPainter::paint(const Annotation &a)
         break;
     }
     case Annotation::Type::Line:
-        if (a.points.size() >= 2) {
+        if (a.bends()) {
+            m_painter.setPen(strokePen(a, m_scale));
+            m_painter.setBrush(Qt::NoBrush);
+            QPainterPath curve(map(a.points[0]));
+            curve.quadTo(map(a.points[2]), map(a.points[1]));
+            m_painter.drawPath(curve);
+        } else if (a.points.size() >= 2) {
             m_painter.setPen(strokePen(a, m_scale));
             m_painter.drawLine(map(a.points[0]), map(a.points[1]));
         }
@@ -139,7 +145,11 @@ void AnnotationPainter::paintArrow(const Annotation &a)
         return;
     const QPointF from = map(a.points[0]);
     const QPointF to = map(a.points[1]);
-    const QLineF line(from, to);
+    // The head points the way the shaft runs into it: from the control
+    // point, when bent.
+    QLineF line(a.bends() ? map(a.points[2]) : from, to);
+    if (line.length() < 0.5)
+        line = QLineF(from, to);
     if (line.length() < 0.5)
         return;
     const qreal head = arrowHead(a.size) * m_scale;
@@ -151,7 +161,15 @@ void AnnotationPainter::paintArrow(const Annotation &a)
 
     m_painter.setPen(strokePen(a, m_scale));
     // Stop the shaft inside the head so round caps don't poke out of it.
-    m_painter.drawLine(from, to - dir * head * 0.6);
+    const QPointF end = to - dir * head * 0.6;
+    if (a.bends()) {
+        m_painter.setBrush(Qt::NoBrush);
+        QPainterPath curve(from);
+        curve.quadTo(map(a.points[2]), end);
+        m_painter.drawPath(curve);
+    } else {
+        m_painter.drawLine(from, end);
+    }
     m_painter.setPen(Qt::NoPen);
     m_painter.setBrush(a.color);
     m_painter.drawPolygon(tip);

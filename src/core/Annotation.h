@@ -53,6 +53,16 @@ struct Annotation
     bool isEmpty() const;
     // Two end points to drag, like a line's.
     bool hasEndPoints() const;
+    // A line or an arrow, which bends by a handle in its middle.
+    bool canBend() const { return type == Type::Line || type == Type::Arrow; }
+    // Bent: a third point, the control point of the curve from the first
+    // point to the second.
+    bool bends() const { return canBend() && points.size() >= 3; }
+    // The middle of a line or arrow, straight or bent: where its handle is.
+    QPointF bendHandle() const;
+    // Bends a line or arrow so that its middle runs through `p`; close to
+    // where it is straight, it is straight again.
+    void bendThrough(const QPointF &p);
     // A box to resize by its corners and edges, like a rectangle's.
     bool hasBox() const;
     // Pixels in a rectangle: an image or a video clip.

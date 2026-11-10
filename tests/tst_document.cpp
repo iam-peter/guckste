@@ -237,6 +237,49 @@ private slots:
         QCOMPARE(doc.hitTest(50, 90, 1), 0);
     }
 
+    // An arrow bends through the handle in its middle, and its frame takes
+    // in the curve; dragged back to straight, it is straight again.
+    void bendsArrows()
+    {
+        Document doc;
+        doc.setImage(checkerboard(100, 100));
+        doc.beginAnnotation(Document::Arrow, 20, 50, Qt::red, 2);
+        doc.updateAnnotation(30, 50, false);
+        doc.commitAnnotation();
+        QCOMPARE(doc.handlePoints(0)[2].toPointF(), QPointF(25, 50));
+
+        doc.beginHandleDrag(0);
+        doc.dragHandle(2, 25, 10, 0);
+        doc.endHandleDrag();
+        QVERIFY(doc.annotations()[0].bends());
+        QCOMPARE(doc.handlePoints(0)[2].toPointF(), QPointF(25, 10));
+        const QRectF bounds = doc.annotationBounds(0, 1);
+        // The curve's top with room for the head, not its control point at
+        // -30.
+        QVERIFY(bounds.top() <= 10 && bounds.top() > -5);
+        QCOMPARE(doc.hitTest(25, 12, 1), 0);
+        // Drawn along the curve, not straight across.
+        const QImage out = doc.render(1);
+        const auto red = [&out](int x, int y) {
+            const QColor c = out.pixelColor(x, y);
+            return c.red() > 200 && c.green() < 60 && c.blue() < 60;
+        };
+        QVERIFY(red(25, 10));
+        QVERIFY(!red(25, 50));
+
+        // Undone in one step.
+        doc.undo();
+        QVERIFY(!doc.annotations()[0].bends());
+        doc.redo();
+        QVERIFY(doc.annotations()[0].bends());
+
+        doc.beginHandleDrag(0);
+        doc.dragHandle(2, 25, 51, 0);
+        doc.endHandleDrag();
+        QVERIFY(!doc.annotations()[0].bends());
+        QCOMPARE(doc.annotations()[0].points.size(), 2);
+    }
+
     // Another screenshot goes right of the first, and the canvas takes
     // in both; the gap is transparent.
     void combinesImages()
@@ -297,7 +340,8 @@ private slots:
         doc.beginAnnotation(Document::Arrow, 10, 10, Qt::red, 2);
         doc.updateAnnotation(50, 10, false);
         doc.commitAnnotation();
-        QCOMPARE(doc.handlePoints(0).size(), 2);
+        // Its ends, and its middle to bend it by.
+        QCOMPARE(doc.handlePoints(0).size(), 3);
         doc.beginHandleDrag(0);
         doc.dragHandle(1, 60, 52, Qt::ShiftModifier);
         doc.endHandleDrag();
