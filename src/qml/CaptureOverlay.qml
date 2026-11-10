@@ -127,6 +127,19 @@ Window {
         return Qt.rect(0, 0, 0, 0)
     }
 
+    // Where the selected mark can be reshaped, in image pixels.
+    readonly property var markHandles: document && hasSelection && tool === Document.Select && !textEntry.visible
+                                       && document.revision >= 0 ? document.handlePoints(document.selectedIndex) : []
+
+    // The selected mark's handle under a view point, -1 for none.
+    function markHandleAt(x: real, y: real): int {
+        for (let i = 0; i < markHandles.length; ++i) {
+            if (Math.abs(markHandles[i].x * zoom - x) <= 7 && Math.abs(markHandles[i].y * zoom - y) <= 7)
+                return i
+        }
+        return -1
+    }
+
     property int tool: Document.Select
     property color toolColor: Preferences.color
     property real size: Preferences.size
@@ -502,6 +515,24 @@ Window {
         }
     }
 
+    // Where the selected mark can be reshaped: round for the ends and the
+    // bend of a line, square on the eight points of a box.
+    Repeater {
+        model: mouse.mode === "draw" ? 0 : root.markHandles.length
+        Rectangle {
+            required property int index
+            readonly property point at: root.markHandles[index] ?? Qt.point(0, 0)
+            x: at.x * root.zoom - width / 2
+            y: at.y * root.zoom - height / 2
+            width: 9
+            height: 9
+            radius: root.markHandles.length < 8 ? 4.5 : 0
+            color: "white"
+            border.color: "#a0000000"
+            border.width: 1
+        }
+    }
+
     // The region's size, above it or inside its top edge.
     Rectangle {
         visible: root.hasSelection
@@ -545,7 +576,8 @@ Window {
         id: mouse
 
         // "select": dragging out a region; "move", "resize": changing it;
-        // "draw": an annotation; "drag": moving an annotation.
+        // "draw": an annotation; "drag": moving an annotation; "reshape":
+        // dragging one of its handles.
         property string mode: ""
         property point anchor
         property rect pressedTarget
@@ -553,11 +585,14 @@ Window {
         property int handle: -1
         property point last
         property int hoverHandle: -1
+        property int hoverMarkHandle: -1
 
         anchors.fill: parent
         hoverEnabled: true
         acceptedButtons: Qt.LeftButton | Qt.RightButton
         cursorShape: {
+            if (mode === "reshape" || (mode === "" && hoverMarkHandle >= 0))
+                return Qt.SizeAllCursor
             if (mode === "move" || (mode === "" && root.hasSelection && root.tool === Document.Select
                                     && hoverHandle === -1 && root.cursor.x >= 0 && insideSelection(root.cursor)))
                 return Qt.SizeAllCursor
@@ -610,6 +645,13 @@ Window {
                 return
             }
             if (root.tool === Document.Select) {
+                const mh = root.markHandleAt(event.x, event.y)
+                if (mh >= 0) {
+                    root.document.beginHandleDrag(root.document.selectedIndex)
+                    mode = "reshape"
+                    handle = mh
+                    return
+                }
                 const h = handleAt(event.x, event.y)
                 if (h >= 0) {
                     mode = "resize"
@@ -666,8 +708,12 @@ Window {
                 root.document.moveBy(p.x - last.x, p.y - last.y)
                 last = p
                 break
+            case "reshape":
+                root.document.dragHandle(handle, p.x, p.y, event.modifiers)
+                break
             default:
-                hoverHandle = handleAt(event.x, event.y)
+                hoverMarkHandle = root.markHandleAt(event.x, event.y)
+                hoverHandle = hoverMarkHandle >= 0 ? -1 : handleAt(event.x, event.y)
                 break
             }
         }
@@ -687,9 +733,13 @@ Window {
             case "drag":
                 root.document.endMove()
                 break
+            case "reshape":
+                root.document.endHandleDrag()
+                break
             }
             mode = ""
-            hoverHandle = handleAt(event.x, event.y)
+            hoverMarkHandle = root.markHandleAt(event.x, event.y)
+            hoverHandle = hoverMarkHandle >= 0 ? -1 : handleAt(event.x, event.y)
         }
 
         onExited: root.cursor = Qt.point(-1, -1)

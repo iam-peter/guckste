@@ -521,6 +521,55 @@ private slots:
         QTRY_VERIFY(!window->isVisible());
     }
 
+    // An arrow drawn and then picked bends by the handle in its middle.
+    void arrowBendsByItsHandle()
+    {
+        auto *document = new Document;
+        document->setImage(demoScreen(400, 300));
+        QQmlComponent component(m_engine);
+        component.loadFromModule("Guckste", "EditorWindow");
+        auto *window = qobject_cast<QQuickWindow *>(
+            component.createWithInitialProperties({{u"document"_s, QVariant::fromValue(document)}}));
+        QVERIFY2(window, qPrintable(component.errorString()));
+        document->setParent(window);
+        window->show();
+        QVERIFY(QTest::qWaitForWindowExposed(window));
+        auto *area = window->findChild<QQuickItem *>(u"drawingArea"_s);
+        QVERIFY(area);
+        const auto view = [&](qreal x, qreal y) {
+            QPointF p;
+            QMetaObject::invokeMethod(area, "toView", Q_RETURN_ARG(QPointF, p), Q_ARG(double, x), Q_ARG(double, y));
+            return area->mapToScene(p).toPoint();
+        };
+
+        window->setProperty("tool", int(Document::Arrow));
+        QTest::mousePress(window, Qt::LeftButton, Qt::NoModifier, view(100, 150));
+        QTest::mouseMove(window, view(130, 150));
+        QTest::mouseMove(window, view(160, 150));
+        QTest::mouseRelease(window, Qt::LeftButton, Qt::NoModifier, view(160, 150));
+        QCOMPARE(document->annotationCount(), 1);
+
+        window->setProperty("tool", int(Document::Select));
+        QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier, view(115, 150));
+        QCOMPARE(document->selectedIndex(), 0);
+        QTRY_COMPARE(area->property("handlePoints").toList().size(), 3);
+        QTest::qWait(50);
+        saveScreenshot(window, u"editor-arrow-handles"_s);
+
+        QTest::mousePress(window, Qt::LeftButton, Qt::NoModifier, view(130, 150));
+        QTest::mouseMove(window, view(130, 120));
+        QTest::mouseMove(window, view(130, 90));
+        QTest::mouseRelease(window, Qt::LeftButton, Qt::NoModifier, view(130, 90));
+        QVERIFY(document->annotations()[0].bends());
+        QCOMPARE(document->annotations()[0].bendHandle(), QPointF(130, 90));
+
+        QTest::qWait(50);
+        saveScreenshot(window, u"editor-arrow-bent"_s);
+        window->setProperty("discardConfirmed", true);
+        window->close();
+        QTRY_VERIFY(!window->isVisible());
+    }
+
     // At 100 % every image pixel lands on one screen pixel, whatever the
     // window's size: half-pixel offsets used to double some and drop others.
     void editorShowsPixelsExactly()
@@ -660,6 +709,25 @@ private slots:
         const QImage out = document->render(1, window->property("selection").toRect());
         QCOMPARE(out.size(), QSize(600, 400));
         QCOMPARE(out.pixelColor(150 - 120, 200 - 120), document->annotations().first().color);
+
+        // An arrow, picked, bends by the handle in its middle.
+        window->setProperty("tool", int(Document::Arrow));
+        QTest::mousePress(window, Qt::LeftButton, Qt::NoModifier, QPoint(450, 400));
+        QTest::mouseMove(window, QPoint(500, 400));
+        QTest::mouseMove(window, QPoint(550, 400));
+        QTest::mouseRelease(window, Qt::LeftButton, Qt::NoModifier, QPoint(550, 400));
+        QCOMPARE(document->annotationCount(), 2);
+        window->setProperty("tool", int(Document::Select));
+        QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier, QPoint(470, 400));
+        QCOMPARE(document->selectedIndex(), 1);
+        QTRY_COMPARE(window->property("markHandles").toList().size(), 3);
+        QTest::mousePress(window, Qt::LeftButton, Qt::NoModifier, QPoint(500, 400));
+        QTest::mouseMove(window, QPoint(500, 370));
+        QTest::mouseMove(window, QPoint(500, 340));
+        QTest::mouseRelease(window, Qt::LeftButton, Qt::NoModifier, QPoint(500, 340));
+        QVERIFY(document->annotations()[1].bends());
+        QCOMPARE(document->annotations()[1].bendHandle(), QPointF(500, 340));
+        QCOMPARE(window->property("selection").toRect(), QRect(120, 120, 600, 400));
 
         QTest::qWait(50);
         saveScreenshot(window, u"overlay"_s);
