@@ -222,6 +222,21 @@ private slots:
         QCOMPARE(doc.hitTest(20, 20, 1), 0);
     }
 
+    // A pen stroke is framed and hit along all of it, not at its start.
+    void boundsAPenStroke()
+    {
+        Document doc;
+        doc.setImage(checkerboard(100, 100));
+        doc.beginAnnotation(Document::Pen, 10, 10, Qt::red, 2);
+        doc.updateAnnotation(80, 20, false);
+        doc.updateAnnotation(50, 90, false);
+        doc.commitAnnotation();
+        const QRectF bounds = doc.annotationBounds(0, 1);
+        QVERIFY(bounds.contains(QRectF(10, 10, 70, 80)));
+        QVERIFY(bounds.width() < 75 && bounds.height() < 85);
+        QCOMPARE(doc.hitTest(50, 90, 1), 0);
+    }
+
     // Another screenshot goes right of the first, and the canvas takes
     // in both; the gap is transparent.
     void combinesImages()

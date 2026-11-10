@@ -1,6 +1,7 @@
 #include "Annotation.h"
 
 #include <QLineF>
+#include <QPolygonF>
 #include <cmath>
 
 QRectF Annotation::rect() const
@@ -15,12 +16,10 @@ QRectF Annotation::geometryBounds() const
     if (points.isEmpty())
         return {};
     switch (type) {
-    case Type::Pen: {
-        QRectF bounds(points.first(), QSizeF(0, 0));
-        for (const QPointF &p : points)
-            bounds |= QRectF(p, QSizeF(0, 0));
-        return bounds;
-    }
+    case Type::Pen:
+        // Not a union of the points: a rectangle without size is null to
+        // QRectF, and a union passes over it.
+        return QPolygonF(points).boundingRect();
     case Type::Text:
     case Type::Counter:
         return QRectF(points.first(), QSizeF(0, 0));
