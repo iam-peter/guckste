@@ -237,6 +237,41 @@ private slots:
         QCOMPARE(doc.hitTest(50, 90, 1), 0);
     }
 
+    // A stroke is dashed as drawn or later, the change one undo step; a
+    // mark without a stroke has no dashes.
+    void dashesStrokes()
+    {
+        Document doc;
+        QImage white(100, 40, QImage::Format_ARGB32_Premultiplied);
+        white.fill(Qt::white);
+        doc.setImage(white);
+        doc.beginAnnotation(Document::Line, 10, 20, Qt::red, 2, true);
+        doc.updateAnnotation(90, 20, false);
+        doc.commitAnnotation();
+        QVERIFY(doc.annotationDashed(0));
+        const QImage out = doc.render(1);
+        int dash = 0, gap = 0;
+        for (int x = 14; x < 86; ++x) {
+            const QColor c = out.pixelColor(x, 20);
+            dash += c.red() > 200 && c.green() < 80;
+            gap += c.green() > 200;
+        }
+        QVERIFY2(dash > 25 && gap > 15, qPrintable(u"%1 dash, %2 gap"_s.arg(dash).arg(gap)));
+
+        doc.beginAnnotation(Document::Counter, 50, 30, Qt::red, 2, true);
+        doc.commitAnnotation();
+        QVERIFY(!doc.annotationHasStroke(1));
+        QVERIFY(!doc.annotationDashed(1));
+        doc.setAnnotationDashed(1, true);
+        QVERIFY(!doc.annotationDashed(1));
+
+        doc.setAnnotationDashed(0, false);
+        QVERIFY(!doc.annotationDashed(0));
+        doc.undo();
+        QVERIFY(doc.annotationDashed(0));
+        QCOMPARE(doc.annotationCount(), 2);
+    }
+
     // An arrow bends through the handle in its middle, and its frame takes
     // in the curve; dragged back to straight, it is straight again.
     void bendsArrows()

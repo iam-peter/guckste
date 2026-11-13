@@ -95,6 +95,12 @@ void Annotation::bendThrough(const QPointF &p)
         points << 2 * p - straight;
 }
 
+bool Annotation::hasStroke() const
+{
+    return type == Type::Pen || type == Type::Line || type == Type::Arrow || type == Type::Rectangle
+        || type == Type::Ellipse;
+}
+
 bool Annotation::hasBox() const
 {
     return type == Type::Rectangle || type == Type::Ellipse || type == Type::Marker || type == Type::Pixelate

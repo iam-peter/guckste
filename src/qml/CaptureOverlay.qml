@@ -143,6 +143,7 @@ Window {
     property int tool: Document.Select
     property color toolColor: Preferences.color
     property real size: Preferences.size
+    property bool dashed: Preferences.dashed
     property real textSize: Preferences.textSize
     property point cursor: Qt.point(-1, -1)
 
@@ -215,6 +216,7 @@ Window {
     function rememberTools() {
         Preferences.color = toolColor
         Preferences.size = size
+        Preferences.dashed = dashed
         Preferences.textSize = textSize
         if (hasSelection)
             Preferences.lastRegion = Qt.rect(Math.round(screenGeometry.x + selection.x / imageScale),
@@ -347,6 +349,7 @@ Window {
     function cancel() {
         Preferences.color = toolColor
         Preferences.size = size
+        Preferences.dashed = dashed
         Preferences.textSize = textSize
         root.close()
     }
@@ -684,7 +687,7 @@ Window {
                 textEntry.openAt(event.x, event.y, p.x, p.y, "")
                 return
             }
-            root.document.beginAnnotation(root.tool, p.x, p.y, root.toolColor, root.size)
+            root.document.beginAnnotation(root.tool, p.x, p.y, root.toolColor, root.size, root.dashed)
             mode = "draw"
         }
 
@@ -811,12 +814,14 @@ Window {
         tool: root.tool
         color: root.toolColor
         size: root.size
+        dashed: root.dashed
         textSize: root.textSize
         textMode: root.tool === Document.Text
         document: root.document
         onToolPicked: tool => root.tool = tool
         onColorPicked: picked => root.toolColor = picked
         onSizePicked: size => root.size = size
+        onDashedPicked: dashed => root.dashed = dashed
         onTextSizePicked: size => root.textSize = size
         x: root.clamp(root.selectionView.x + root.selectionView.width / 2 - width / 2, 4, root.width - width - 4)
         y: {

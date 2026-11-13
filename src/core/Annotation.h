@@ -18,6 +18,8 @@ struct Annotation
     Type type = Type::Pen;
     QList<QPointF> points;
     QColor color = QColor(255, 59, 48);
+    // Stroked in dashes; only a mark with a stroke has them.
+    bool dashed = false;
     // The stroke width, or a text's font size, in image pixels; for a
     // Measure mark in screen pixels.
     qreal size = 3;
@@ -53,6 +55,9 @@ struct Annotation
     bool isEmpty() const;
     // Two end points to drag, like a line's.
     bool hasEndPoints() const;
+    // A stroke that can be dashed: a pen's, a line's, an arrow's shaft, a
+    // rectangle's or an ellipse's.
+    bool hasStroke() const;
     // A line or an arrow, which bends by a handle in its middle.
     bool canBend() const { return type == Type::Line || type == Type::Arrow; }
     // Bent: a third point, the control point of the curve from the first

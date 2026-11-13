@@ -6,7 +6,7 @@ import QtQuick.Layouts
 import Guckste
 import Guckste.Core
 
-// The drawing tools, the color, the stroke size and undo, shared by the
+// The drawing tools, the color, the stroke and undo, shared by the
 // capture overlay and the editor. Whatever a window adds (copy, save, zoom)
 // goes into `actions`.
 ToolBar {
@@ -15,6 +15,7 @@ ToolBar {
     property int tool: Document.Select
     property color color: "#ff3b30"
     property real size: 3
+    property bool dashed: false
     // A text's font size in pixels, set instead of the stroke size while
     // `textMode` is on, as with the text tool, or a text selected.
     property real textSize: 20
@@ -31,6 +32,8 @@ ToolBar {
         return index >= 0 && document.isShown(index) && document.annotationTool(index) !== Document.Image ? index : -1
     }
     readonly property int selectedKind: selectedMark >= 0 ? document.annotationTool(selectedMark) : -1
+    readonly property list<int> strokeTools: [Document.Pen, Document.Line, Document.Arrow, Document.Rectangle,
+                                              Document.Ellipse]
 
     function pickColor(picked: color) {
         colorPicked(picked)
@@ -42,6 +45,12 @@ ToolBar {
         sizePicked(picked)
         if (selectedMark >= 0 && selectedKind !== Document.Text)
             document.setAnnotationSize(selectedMark, picked)
+    }
+
+    function pickDashed(picked: bool) {
+        dashedPicked(picked)
+        if (selectedMark >= 0)
+            document.setAnnotationDashed(selectedMark, picked)
     }
 
     function pickTextSize(picked: real) {
@@ -61,6 +70,8 @@ ToolBar {
                 bar.textSizePicked(bar.document.annotationSize(index))
             else
                 bar.sizePicked(bar.document.annotationSize(index))
+            if (bar.document.annotationHasStroke(index))
+                bar.dashedPicked(bar.document.annotationDashed(index))
         }
     }
     property Document document
@@ -106,6 +117,7 @@ ToolBar {
     signal toolPicked(int tool)
     signal colorPicked(color color)
     signal sizePicked(real size)
+    signal dashedPicked(bool dashed)
     signal textSizePicked(real size)
 
     readonly property var tools: [
@@ -386,6 +398,17 @@ ToolBar {
                 text: qsTr("Size: %1 px").arg(Math.round(sizeSlider.value))
                 visible: sizeSlider.hovered || sizeSlider.pressed
             }
+        }
+        IconButton {
+            objectName: "dashedButton"
+            visible: !bar.showsTextSize
+            iconName: "square-dashed"
+            tip: qsTr("Dashed stroke")
+            checked: bar.dashed
+            // For the mark selected, or else for what the tool draws.
+            enabled: bar.selectedMark >= 0 ? bar.strokeTools.includes(bar.selectedKind)
+                                           : bar.tool === Document.Select || bar.strokeTools.includes(bar.tool)
+            onClicked: bar.pickDashed(!bar.dashed)
         }
     }
 

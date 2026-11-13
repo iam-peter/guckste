@@ -17,6 +17,7 @@ const auto kCopyPath = "capture/copyPathAfterSave";
 const auto kColor = "tools/color";
 const auto kSize = "tools/size";
 const auto kTextSize = "tools/textSize";
+const auto kDashed = "tools/dashed";
 const auto kShowGrid = "editor/showGrid";
 const auto kSnapToGuides = "editor/snapToGuides";
 const auto kExportGuides = "editor/exportGuides";
@@ -150,6 +151,19 @@ void Preferences::setSize(qreal size)
     if (qFuzzyCompare(size, this->size()))
         return;
     m_settings.setValue(kSize, size);
+    emit changed();
+}
+
+bool Preferences::dashed() const
+{
+    return m_settings.value(kDashed, false).toBool();
+}
+
+void Preferences::setDashed(bool dashed)
+{
+    if (dashed == this->dashed())
+        return;
+    m_settings.setValue(kDashed, dashed);
     emit changed();
 }
 

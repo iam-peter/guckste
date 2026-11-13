@@ -190,7 +190,8 @@ public:
     void setSelectedIndex(int index);
 
     // Drawing: begin at a point, update with the pointer, commit on release.
-    Q_INVOKABLE void beginAnnotation(int tool, qreal x, qreal y, const QColor &color, qreal size);
+    Q_INVOKABLE void beginAnnotation(int tool, qreal x, qreal y, const QColor &color, qreal size,
+                                     bool dashed = false);
     // `constrain` holds a line to 45° steps, a rectangle square, and a
     // Measure mark to one axis.
     Q_INVOKABLE void updateAnnotation(qreal x, qreal y, bool constrain);
@@ -203,11 +204,15 @@ public:
     Q_INVOKABLE int annotationTool(int index) const;
     Q_INVOKABLE qreal annotationSize(int index) const;
     Q_INVOKABLE QColor annotationColor(int index) const;
+    Q_INVOKABLE bool annotationDashed(int index) const;
+    // A stroke that can be dashed.
+    Q_INVOKABLE bool annotationHasStroke(int index) const;
     Q_INVOKABLE int nextNumber() const;
     // Restyling a mark: a run of changes to one mark, like dragging the
     // size slider, is one undo step.
     Q_INVOKABLE void setAnnotationColor(int index, const QColor &color);
     Q_INVOKABLE void setAnnotationSize(int index, qreal size);
+    Q_INVOKABLE void setAnnotationDashed(int index, bool dashed);
     // Layer order: index 0 is drawn first, right above the screenshot.
     Q_INVOKABLE void moveLayer(int from, int to);
 

@@ -11,6 +11,10 @@ namespace {
 QPen strokePen(const Annotation &a, qreal scale)
 {
     QPen pen(a.color, a.size * scale, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin);
+    // In stroke widths; the round caps lengthen each dash by one, so the
+    // dashes show three widths long with two between them.
+    if (a.dashed && a.hasStroke())
+        pen.setDashPattern({2, 3});
     return pen;
 }
 

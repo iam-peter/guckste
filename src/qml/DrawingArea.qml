@@ -20,6 +20,7 @@ Item {
     property int tool: Document.Select
     property color toolColor: "#ff3b30"
     property real size: 3
+    property bool dashed: false
     // A new text's font size in pixels.
     property real textSize: 20
     property bool showGrid: false
@@ -249,7 +250,7 @@ Item {
                 textEntry.openAt(v.x, v.y, p.x, p.y, "")
                 return
             }
-            area.document.beginAnnotation(area.tool, p.x, p.y, area.toolColor, area.size)
+            area.document.beginAnnotation(area.tool, p.x, p.y, area.toolColor, area.size, area.dashed)
             mode = "draw"
         }
 

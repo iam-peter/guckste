@@ -198,7 +198,7 @@ void Document::setModified(bool modified)
     emit modifiedChanged();
 }
 
-void Document::beginAnnotation(int tool, qreal x, qreal y, const QColor &color, qreal size)
+void Document::beginAnnotation(int tool, qreal x, qreal y, const QColor &color, qreal size, bool dashed)
 {
     if (tool == Select)
         return;
@@ -207,6 +207,7 @@ void Document::beginAnnotation(int tool, qreal x, qreal y, const QColor &color, 
     a.startMs = qMax(0, m_time);
     a.color = color;
     a.size = size;
+    a.dashed = dashed && a.hasStroke();
     QPointF p(x, y);
     if (a.type == Annotation::Type::Image)
         return;
@@ -337,6 +338,16 @@ QColor Document::annotationColor(int index) const
     return index >= 0 && index < m_annotations.size() ? m_annotations[index].color : QColor();
 }
 
+bool Document::annotationDashed(int index) const
+{
+    return index >= 0 && index < m_annotations.size() && m_annotations[index].dashed;
+}
+
+bool Document::annotationHasStroke(int index) const
+{
+    return index >= 0 && index < m_annotations.size() && m_annotations[index].hasStroke();
+}
+
 int Document::nextNumber() const
 {
     int highest = 0;
@@ -428,6 +439,19 @@ void Document::setAnnotationSize(int index, qreal size)
         m_restyling = index;
     }
     m_annotations[index].size = size;
+    emit changed();
+}
+
+void Document::setAnnotationDashed(int index, bool dashed)
+{
+    if (index < 0 || index >= m_annotations.size() || !m_annotations[index].hasStroke()
+        || m_annotations[index].dashed == dashed)
+        return;
+    if (m_restyling != index) {
+        pushUndo();
+        m_restyling = index;
+    }
+    m_annotations[index].dashed = dashed;
     emit changed();
 }
 

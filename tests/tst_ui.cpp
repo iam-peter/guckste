@@ -521,6 +521,65 @@ private slots:
         QTRY_VERIFY(!window->isVisible());
     }
 
+    // The toolbar's dashed button dashes what is drawn next, and the
+    // selected mark.
+    void toolbarDashesStrokes()
+    {
+        auto *document = new Document;
+        document->setImage(demoScreen(400, 300));
+        QQmlComponent component(m_engine);
+        component.loadFromModule("Guckste", "EditorWindow");
+        auto *window = qobject_cast<QQuickWindow *>(
+            component.createWithInitialProperties({{u"document"_s, QVariant::fromValue(document)}}));
+        QVERIFY2(window, qPrintable(component.errorString()));
+        document->setParent(window);
+        window->show();
+        QVERIFY(QTest::qWaitForWindowExposed(window));
+        auto *area = window->findChild<QQuickItem *>(u"drawingArea"_s);
+        auto *dashed = window->findChild<QQuickItem *>(u"dashedButton"_s);
+        QVERIFY(area && dashed);
+        // Wide enough that the stroke is not behind the more button.
+        window->setWidth(1400);
+        QTRY_VERIFY(dashed->isVisible());
+        const auto view = [&](qreal x, qreal y) {
+            QPointF p;
+            QMetaObject::invokeMethod(area, "toView", Q_RETURN_ARG(QPointF, p), Q_ARG(double, x), Q_ARG(double, y));
+            return area->mapToScene(p).toPoint();
+        };
+        const auto clickDashed = [&] {
+            QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier,
+                              dashed->mapToScene(QPointF(dashed->width() / 2, dashed->height() / 2)).toPoint());
+        };
+
+        window->setProperty("tool", int(Document::Rectangle));
+        QVERIFY(dashed->isEnabled());
+        clickDashed();
+        QVERIFY(window->property("dashed").toBool());
+        QTest::mousePress(window, Qt::LeftButton, Qt::NoModifier, view(100, 100));
+        QTest::mouseMove(window, view(150, 130));
+        QTest::mouseMove(window, view(200, 160));
+        QTest::mouseRelease(window, Qt::LeftButton, Qt::NoModifier, view(200, 160));
+        QCOMPARE(document->annotationCount(), 1);
+        QVERIFY(document->annotationDashed(0));
+        QCOMPARE(document->selectedIndex(), 0);
+        QTest::qWait(50);
+        saveScreenshot(window, u"editor-dashed"_s);
+
+        // Off again for the rectangle, still selected.
+        clickDashed();
+        QVERIFY(!document->annotationDashed(0));
+        QVERIFY(!window->property("dashed").toBool());
+
+        // Nothing to dash on a marker.
+        window->setProperty("tool", int(Document::Marker));
+        document->setSelectedIndex(-1);
+        QTRY_VERIFY(!dashed->isEnabled());
+
+        window->setProperty("discardConfirmed", true);
+        window->close();
+        QTRY_VERIFY(!window->isVisible());
+    }
+
     // An arrow drawn and then picked bends by the handle in its middle.
     void arrowBendsByItsHandle()
     {

@@ -46,6 +46,7 @@ ApplicationWindow {
     property int tool: Document.Select
     property color toolColor: Preferences.color
     property real size: Preferences.size
+    property bool dashed: Preferences.dashed
     property real textSize: Preferences.textSize
     property bool showGrid: Preferences.showGrid
     // Export at the zoom on screen, or at the image's own size.
@@ -214,6 +215,7 @@ ApplicationWindow {
     function rememberTools() {
         Preferences.color = toolColor
         Preferences.size = size
+        Preferences.dashed = dashed
         Preferences.textSize = textSize
     }
 
@@ -373,6 +375,7 @@ ApplicationWindow {
         tool: root.tool
         color: root.toolColor
         size: root.size
+        dashed: root.dashed
         textSize: root.textSize
         textMode: root.textMode
         document: root.document
@@ -381,6 +384,7 @@ ApplicationWindow {
         onTextSizePicked: size => root.textSize = size
         onColorPicked: picked => root.toolColor = picked
         onSizePicked: size => root.size = size
+        onDashedPicked: dashed => root.dashed = dashed
 
         IconButton {
             id: addButton
@@ -752,6 +756,7 @@ ApplicationWindow {
                 tool: root.tool
                 toolColor: root.toolColor
                 size: root.size
+                dashed: root.dashed
                 textSize: root.textSize
                 showGrid: root.showGrid
                 gridMinZoom: 8
