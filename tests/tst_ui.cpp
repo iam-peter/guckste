@@ -815,6 +815,74 @@ private slots:
         QTRY_VERIFY(!window->isVisible());
     }
 
+    // Shift keeps the region square or its shape, Alt sizes it about its
+    // center, Space pans it while it is sized, and Shift moves it along one
+    // axis. Its center is marked.
+    void overlaySizesTheRegion()
+    {
+        auto *document = new Document;
+        document->setImage(demoScreen(1280, 800));
+        QQmlComponent component(m_engine);
+        component.loadFromModule("Guckste", "CaptureOverlay");
+        QObject *object = component.createWithInitialProperties(
+            {{u"document"_s, QVariant::fromValue(document)}, {u"screenGeometry"_s, QRect(0, 0, 1280, 800)}});
+        QVERIFY2(object, qPrintable(component.errorString()));
+        auto *window = qobject_cast<QQuickWindow *>(object);
+        QVERIFY(window);
+        document->setParent(window);
+        window->show();
+        QVERIFY(QTest::qWaitForWindowExposed(window));
+        const auto move = [&](QPoint at, Qt::KeyboardModifiers modifiers) {
+            QTest::mouseEvent(QTest::MouseMove, window, Qt::NoButton, modifiers, at);
+        };
+        const auto selection = [&] { return window->property("selection").toRect(); };
+
+        // Dragged out: a square with Shift, as dragged once it is let go,
+        // from the press as the center with Alt.
+        QTest::mousePress(window, Qt::LeftButton, Qt::NoModifier, QPoint(100, 100));
+        move({200, 150}, Qt::ShiftModifier);
+        QCOMPARE(selection(), QRect(100, 100, 100, 100));
+        QTest::keyRelease(window, Qt::Key_Shift);
+        QCOMPARE(selection(), QRect(100, 100, 100, 50));
+        QTest::keyPress(window, Qt::Key_Alt);
+        QCOMPARE(selection(), QRect(0, 50, 200, 100));
+        QTest::keyRelease(window, Qt::Key_Alt);
+        QCOMPARE(selection(), QRect(100, 100, 100, 50));
+        // Space pans it, and after Space it is sized from where it went.
+        QTest::keyPress(window, Qt::Key_Space);
+        move({300, 250}, Qt::NoModifier);
+        QCOMPARE(selection(), QRect(200, 200, 100, 50));
+        QTest::keyRelease(window, Qt::Key_Space);
+        move({400, 300}, Qt::NoModifier);
+        QTest::mouseRelease(window, Qt::LeftButton, Qt::NoModifier, QPoint(400, 300));
+        QCOMPARE(selection(), QRect(200, 200, 200, 100));
+
+        auto *center = window->findChild<QQuickItem *>(u"regionCenter"_s);
+        QVERIFY(center && center->isVisible());
+        QCOMPARE(QPointF(center->x(), center->y()), QPointF(300, 250));
+
+        // By a corner with Shift, it keeps its 2:1.
+        QTest::mousePress(window, Qt::LeftButton, Qt::NoModifier, QPoint(400, 300));
+        move({500, 310}, Qt::ShiftModifier);
+        QTest::mouseRelease(window, Qt::LeftButton, Qt::ShiftModifier, QPoint(500, 310));
+        QCOMPARE(selection(), QRect(200, 200, 300, 150));
+        // By an edge with Alt, the other edge moves the other way.
+        QTest::mousePress(window, Qt::LeftButton, Qt::NoModifier, QPoint(500, 275));
+        move({520, 275}, Qt::AltModifier);
+        QTest::mouseRelease(window, Qt::LeftButton, Qt::AltModifier, QPoint(520, 275));
+        QCOMPARE(selection(), QRect(180, 200, 340, 150));
+        // Moved with Shift, along one axis.
+        QTest::mousePress(window, Qt::LeftButton, Qt::NoModifier, QPoint(300, 250));
+        move({340, 260}, Qt::ShiftModifier);
+        QTest::mouseRelease(window, Qt::LeftButton, Qt::ShiftModifier, QPoint(340, 260));
+        QCOMPARE(selection(), QRect(220, 200, 340, 150));
+
+        QTest::qWait(50);
+        saveScreenshot(window, u"overlay-center"_s);
+        window->close();
+        QTRY_VERIFY(!window->isVisible());
+    }
+
     // All screens and Previous are kept like the other modes and open with
     // their region selected; switching the mode drops it again.
     // Next to the record button: which stills a recording keeps, toggled

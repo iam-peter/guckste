@@ -78,8 +78,10 @@ in any mode, switching the mode drops the region picked so far, and the
 mode is kept for the next time, so All screens and Previous have their
 region selected as soon as the overlay opens. Ctrl+A selects everything
 in any mode. The region can be dragged, resized by its handles and
-nudged with the arrow keys (Shift for 10 px). A toolbar appears under
-it:
+nudged with the arrow keys (Shift for 10 px). While a region is dragged
+out or resized, Shift keeps it square or its shape, Alt sizes it about
+its center, and Space held down moves it along; Shift moves it along
+one axis. A cross marks its center. A toolbar appears under it:
 
 - Tools: select (V), pen (P), line (L), arrow (A), rectangle (R), ellipse
   (O), marker (M), text (T), pixelate (X), numbered marker (N), measure (D).

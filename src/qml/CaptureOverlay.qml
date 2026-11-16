@@ -168,25 +168,70 @@ Window {
         setSelection(Math.min(a.x, b.x), Math.min(a.y, b.y), Math.abs(b.x - a.x), Math.abs(b.y - a.y))
     }
 
-    function moveSelection(start: rect, dx: real, dy: real) {
+    // The region dragged out from `a` to `b`: Shift makes it a square, Alt
+    // grows it from `a` as its center.
+    function dragOut(a: point, b: point, square: bool, fromCenter: bool) {
+        let dx = b.x - a.x, dy = b.y - a.y
+        if (square) {
+            const side = Math.max(Math.abs(dx), Math.abs(dy))
+            dx = (dx < 0 ? -1 : 1) * side
+            dy = (dy < 0 ? -1 : 1) * side
+        }
+        if (fromCenter)
+            selectBetween(Qt.point(a.x - dx, a.y - dy), Qt.point(a.x + dx, a.y + dy))
+        else
+            selectBetween(a, Qt.point(a.x + dx, a.y + dy))
+    }
+
+    // Shift keeps it to one axis.
+    function moveSelection(start: rect, dx: real, dy: real, oneAxis: bool) {
+        if (oneAxis) {
+            if (Math.abs(dx) >= Math.abs(dy))
+                dy = 0
+            else
+                dx = 0
+        }
         const nx = clamp(Math.round(start.x + dx), 0, document.imageWidth - start.width)
         const ny = clamp(Math.round(start.y + dy), 0, document.imageHeight - start.height)
         selection = Qt.rect(nx, ny, start.width, start.height)
     }
 
-    // Handles: 0 top-left, then clockwise.
-    function resizeSelection(start: rect, handle: int, dx: real, dy: real) {
-        let left = start.x, top = start.y, right = start.x + start.width, bottom = start.y + start.height
-        if (handle === 0 || handle === 6 || handle === 7) left += dx
-        if (handle === 2 || handle === 3 || handle === 4) right += dx
-        if (handle === 0 || handle === 1 || handle === 2) top += dy
-        if (handle === 4 || handle === 5 || handle === 6) bottom += dy
-        selectBetween(Qt.point(left, top), Qt.point(right, bottom))
+    // Handles: 0 top-left, then clockwise. Shift keeps the region's shape,
+    // Alt resizes it about its center.
+    function resizeSelection(start: rect, handle: int, dx: real, dy: real, keepShape: bool, fromCenter: bool) {
+        const movesLeft = handle === 0 || handle === 6 || handle === 7
+        const movesRight = handle === 2 || handle === 3 || handle === 4
+        const movesTop = handle === 0 || handle === 1 || handle === 2
+        const movesBottom = handle === 4 || handle === 5 || handle === 6
+        const both = fromCenter ? 2 : 1
+        // Negative when dragged past the other side, which flips it.
+        let w = start.width + (movesLeft ? -dx : movesRight ? dx : 0) * both
+        let h = start.height + (movesTop ? -dy : movesBottom ? dy : 0) * both
+        if (keepShape && start.width > 0 && start.height > 0) {
+            const ratio = start.width / start.height
+            const across = movesLeft || movesRight, down = movesTop || movesBottom
+            if (across && down) {
+                if (Math.abs(w) / ratio > Math.abs(h))
+                    h = (h < 0 ? -1 : 1) * Math.abs(w) / ratio
+                else
+                    w = (w < 0 ? -1 : 1) * Math.abs(h) * ratio
+            } else if (across) {
+                h = Math.abs(w) / ratio
+            } else {
+                w = Math.abs(h) * ratio
+            }
+        }
+        // Each axis stays put at the edge not dragged, or about the
+        // center, from Alt or from an edge handle of the other axis.
+        const cx = start.x + start.width / 2, cy = start.y + start.height / 2
+        const left = fromCenter || !(movesLeft || movesRight) ? cx - w / 2 : movesRight ? start.x : start.x + start.width - w
+        const top = fromCenter || !(movesTop || movesBottom) ? cy - h / 2 : movesBottom ? start.y : start.y + start.height - h
+        selectBetween(Qt.point(left, top), Qt.point(left + w, top + h))
     }
 
     function nudge(dx: int, dy: int) {
         if (hasSelection)
-            moveSelection(selection, dx, dy)
+            moveSelection(selection, dx, dy, false)
     }
 
     // The whole screen under a window point.
@@ -432,6 +477,20 @@ Window {
         border.width: atEdge ? 3 : 1
     }
 
+    // The region's center, a light cross on a dark outline to show on any
+    // screen; not while drawing on it, nor on a region too small for it.
+    Item {
+        objectName: "regionCenter"
+        readonly property rect s: root.selectionView
+        visible: root.hasSelection && s.width >= 24 && s.height >= 24 && mouse.mode !== "draw"
+        x: Math.floor(s.x + s.width / 2)
+        y: Math.floor(s.y + s.height / 2)
+        Rectangle { x: -7; y: -1; width: 15; height: 3; color: "#90000000" }
+        Rectangle { x: -1; y: -7; width: 3; height: 15; color: "#90000000" }
+        Rectangle { x: -6; y: 0; width: 13; height: 1; color: "white" }
+        Rectangle { x: 0; y: -6; width: 1; height: 13; color: "white" }
+    }
+
     // The window or screen under the pointer: click to take it.
     Rectangle {
         readonly property rect target: root.hoveredTarget
@@ -596,6 +655,44 @@ Window {
         property point last
         property int hoverHandle: -1
         property int hoverMarkHandle: -1
+        // Where the pointer was last, in image pixels, and the modifiers
+        // then, kept up to date by the keys too.
+        property point pointer
+        property int modifiers: Qt.NoModifier
+        property bool spaceHeld: false
+
+        // The region being dragged out, moved or resized, to the pointer.
+        function sizeRegion() {
+            const shift = (modifiers & Qt.ShiftModifier) !== 0
+            const alt = (modifiers & Qt.AltModifier) !== 0
+            if (mode === "select")
+                root.dragOut(anchor, pointer, shift, alt)
+            else if (mode === "move")
+                root.moveSelection(startSelection, pointer.x - anchor.x, pointer.y - anchor.y, shift)
+            else if (mode === "resize")
+                root.resizeSelection(startSelection, handle, pointer.x - anchor.x, pointer.y - anchor.y, shift, alt)
+        }
+
+        // Space, Shift and Alt change the region at once, not only once
+        // the pointer moves.
+        function keyChanged(event: var, down: bool) {
+            if (event.isAutoRepeat)
+                return
+            let flag = Qt.NoModifier
+            if (event.key === Qt.Key_Space) {
+                spaceHeld = down
+                event.accepted = true
+                return
+            } else if (event.key === Qt.Key_Shift) {
+                flag = Qt.ShiftModifier
+            } else if (event.key === Qt.Key_Alt) {
+                flag = Qt.AltModifier
+            } else {
+                return
+            }
+            modifiers = down ? modifiers | flag : modifiers & ~flag
+            sizeRegion()
+        }
 
         anchors.fill: parent
         hoverEnabled: true
@@ -635,6 +732,8 @@ Window {
 
         onPressed: event => {
             const p = root.toImage(event.x, event.y)
+            pointer = p
+            modifiers = event.modifiers
             if (event.button === Qt.RightButton) {
                 if (root.document.drawing)
                     root.document.cancelAnnotation()
@@ -647,6 +746,7 @@ Window {
                 return
             }
             textEntry.commit()
+            keys.forceActiveFocus()
             if (!root.hasSelection) {
                 // Noted before "select" mode hides the highlight.
                 pressedTarget = root.hoveredTarget
@@ -701,15 +801,20 @@ Window {
         onPositionChanged: event => {
             const p = root.toImage(event.x, event.y)
             root.cursor = p
+            // Space pans the region being dragged out or resized.
+            if (spaceHeld && (mode === "select" || mode === "resize")) {
+                const dx = p.x - pointer.x, dy = p.y - pointer.y
+                anchor = Qt.point(anchor.x + dx, anchor.y + dy)
+                const s = startSelection
+                startSelection = Qt.rect(s.x + dx, s.y + dy, s.width, s.height)
+            }
+            pointer = p
+            modifiers = event.modifiers
             switch (mode) {
             case "select":
-                root.selectBetween(anchor, p)
-                break
             case "move":
-                root.moveSelection(startSelection, p.x - anchor.x, p.y - anchor.y)
-                break
             case "resize":
-                root.resizeSelection(startSelection, handle, p.x - anchor.x, p.y - anchor.y)
+                sizeRegion()
                 break
             case "draw":
                 root.document.updateAnnotation(p.x, p.y, root.constrainFor(event.modifiers))
@@ -732,10 +837,13 @@ Window {
             const p = root.toImage(event.x, event.y)
             switch (mode) {
             case "select":
-                if (Math.abs(p.x - anchor.x) < 3 && Math.abs(p.y - anchor.y) < 3)
+                if (Math.abs(p.x - anchor.x) < 3 && Math.abs(p.y - anchor.y) < 3) {
                     root.pickAt(event.x, event.y)
-                else
-                    root.selectBetween(anchor, p)
+                } else if (!spaceHeld) {
+                    pointer = p
+                    modifiers = event.modifiers
+                    sizeRegion()
+                }
                 break
             case "draw":
                 root.document.commitAnnotation()
@@ -834,6 +942,14 @@ Window {
                 }
             }
         }
+    }
+
+    // Takes the keys the mouse area needs while sizing the region.
+    Item {
+        id: keys
+        focus: true
+        Keys.onPressed: event => mouse.keyChanged(event, true)
+        Keys.onReleased: event => mouse.keyChanged(event, false)
     }
 
     TextEntry {
