@@ -540,7 +540,14 @@ private slots:
         QVERIFY(area && dashed);
         // Wide enough that the stroke is not behind the more button.
         window->setWidth(1400);
+        QTRY_COMPARE(window->width(), 1400);
         QTRY_VERIFY(dashed->isVisible());
+        // Placed in the row only once laid out again, after the bar moves
+        // it there.
+        QVERIFY(QQuickTest::qWaitForPolish(window));
+        const QRectF dashedRect = dashed->mapRectToScene(QRectF(0, 0, dashed->width(), dashed->height()));
+        QVERIFY2(dashedRect.right() < window->width() && dashedRect.left() > 0,
+                 qPrintable(u"dashed button at %1"_s.arg(dashedRect.left())));
         const auto view = [&](qreal x, qreal y) {
             QPointF p;
             QMetaObject::invokeMethod(area, "toView", Q_RETURN_ARG(QPointF, p), Q_ARG(double, x), Q_ARG(double, y));
