@@ -385,13 +385,14 @@ void App::warmUp()
     m_recorder->prepare();
 }
 
-void App::captureLater(int seconds, const QRectF &region, bool recordMode)
+void App::captureLater(int seconds, const QRectF &region, bool recordMode, bool keepRegion)
 {
     closeOverlay();
     if (m_countdown)
         m_countdown->close();
     const QRect rect = region.toAlignedRect();
     m_countdownRecordMode = recordMode;
+    m_countdownKeepsRegion = keepRegion;
     QQuickWindow *countdown = createWindow(QStringLiteral("Countdown"),
                                            {{QStringLiteral("region"), rect},
                                             {QStringLiteral("seconds"), qMax(1, seconds)}});
@@ -412,6 +413,8 @@ void App::onCountdownElapsed()
         m_countdown->close();
     }
     recordMode = m_countdownRecordMode;
+    if (!m_countdownKeepsRegion)
+        region = QRect();
     // The countdown has to be off the screen before the capture.
     QTimer::singleShot(100, this, [this, region, recordMode] { openOverlay(recordMode, region); });
 }

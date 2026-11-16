@@ -253,12 +253,19 @@ Window {
                        Math.round(selection.width / imageScale), Math.round(selection.height / imageScale))
     }
 
+    // Captures the screens again after `seconds`: a region picked stays
+    // picked, to change before it is taken; without one, picking starts
+    // then, and the countdown shows on the screen of the mode bar.
     function captureLater(seconds: int) {
-        if (!hasSelection)
-            return
         textEntry.commit()
         rememberTools()
-        App.captureLater(seconds, selectionOnScreen(), recordMode)
+        if (hasSelection) {
+            App.captureLater(seconds, selectionOnScreen(), recordMode)
+            return
+        }
+        const home = barScreen.width > 0 ? barScreen : Qt.rect(0, 0, width, height)
+        App.captureLater(seconds, Qt.rect(screenGeometry.x + home.x, screenGeometry.y + home.y, home.width, home.height),
+                         recordMode, false)
     }
 
     Component.onCompleted: {
@@ -796,6 +803,36 @@ Window {
                     onClicked: root.setPickMode(modelData.mode)
                 }
             }
+            ToolSeparator {
+                visible: timerButton.visible
+                height: timerButton.height
+            }
+            // Before a region is picked too, so a menu or tooltip can be
+            // opened first and picked from after the delay.
+            IconButton {
+                id: timerButton
+                objectName: "timerButton"
+                visible: root.addTarget === null
+                iconName: "timer"
+                text: qsTr("Timer")
+                tip: root.hasSelection ? qsTr("Capture this region again after a delay, for menus and tooltips")
+                                       : qsTr("Capture after a delay, for menus and tooltips")
+                checked: timerMenu.opened
+                onClicked: timerMenu.open()
+                Menu {
+                    id: timerMenu
+                    objectName: "timerMenu"
+                    y: timerButton.height
+                    Repeater {
+                        model: [3, 5, 10]
+                        MenuItem {
+                            required property int modelData
+                            text: qsTr("In %1 seconds").arg(modelData)
+                            onTriggered: root.captureLater(modelData)
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -883,25 +920,6 @@ Window {
             tip: checked ? qsTr("Recording keeps a still when the screen settles after a change (on)")
                          : qsTr("Recording keeps a still when the screen settles after a change (off)")
             onToggled: Preferences.stillsOnChanges = checked
-        }
-        IconButton {
-            id: timerButton
-            visible: root.addTarget === null
-            iconName: "timer"
-            tip: qsTr("Capture this region again after a delay, for menus and tooltips")
-            onClicked: timerMenu.open()
-            Menu {
-                id: timerMenu
-                y: timerButton.height
-                Repeater {
-                    model: [3, 5, 10]
-                    MenuItem {
-                        required property int modelData
-                        text: qsTr("In %1 seconds").arg(modelData)
-                        onTriggered: root.captureLater(modelData)
-                    }
-                }
-            }
         }
         IconButton {
             iconName: "x"

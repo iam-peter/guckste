@@ -95,10 +95,11 @@ it:
 - Enter or Ctrl+C copies the region to the clipboard, Ctrl+S saves it to
   the screenshot folder, E opens it in the editor, Shift+Enter records it,
   Esc cancels.
-- The timer button captures the region again after 3, 5 or 10 seconds:
-  the overlay goes away, a countdown shows beside the region, and the
-  overlay comes back with the region selected and whatever was opened
-  meanwhile, a menu or a tooltip, in the shot.
+- The timer in the mode bar captures the screens again after 3, 5 or 10
+  seconds: the overlay goes away, a countdown shows, and the overlay
+  comes back with whatever was opened meanwhile, a menu or a tooltip, in
+  the shot. A region picked before stays selected, to change or take as
+  it is; without one, the region is picked then.
 
 ### Recording
 

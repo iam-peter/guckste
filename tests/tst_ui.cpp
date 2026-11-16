@@ -740,6 +740,10 @@ private slots:
         QVERIFY(QTest::qWaitForWindowExposed(window));
         QCOMPARE(window->width(), 1280);
 
+        // The timer is there before a region is picked.
+        auto *timer = window->findChild<QQuickItem *>(u"timerButton"_s);
+        QVERIFY(timer && timer->isVisible());
+
         // Drag out a region and draw in it.
         QTest::mousePress(window, Qt::LeftButton, Qt::NoModifier, QPoint(100, 100));
         QTest::mouseMove(window, QPoint(300, 200));
@@ -790,6 +794,23 @@ private slots:
 
         QTest::qWait(50);
         saveScreenshot(window, u"overlay"_s);
+
+        // Without a region, the timer's countdown is at the top of a
+        // screen. Last: the countdown's window throws the test's mouse off.
+        QMetaObject::invokeMethod(window, "clearSelection");
+        QVERIFY(QMetaObject::invokeMethod(window, "captureLater", Q_ARG(int, 3)));
+        QWindow *countdown = nullptr;
+        for (QWindow *w : QGuiApplication::topLevelWindows()) {
+            if (w->isVisible() && w->title() == u"Capturing soon"_s)
+                countdown = w;
+        }
+        QVERIFY(countdown);
+        const QRect home = countdown->property("region").toRect();
+        QVERIFY(std::any_of(QGuiApplication::screens().cbegin(), QGuiApplication::screens().cend(),
+                            [&](QScreen *s) { return s->geometry() == home; }));
+        QCOMPARE(countdown->y(), home.y() + 8);
+        QMetaObject::invokeMethod(countdown, "cancelled");
+        QTRY_VERIFY(!countdown->isVisible());
         window->close();
         QTRY_VERIFY(!window->isVisible());
     }

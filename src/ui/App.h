@@ -55,8 +55,10 @@ public:
     // Pick a region to record.
     Q_INVOKABLE void captureForRecording();
     // Counts down beside `region` (screen coordinates), then captures the
-    // screens again and opens the overlay with the region selected.
-    Q_INVOKABLE void captureLater(int seconds, const QRectF &region, bool recordMode);
+    // screens again and opens the overlay with the region selected. Without
+    // `keepRegion` nothing is selected then, and the region is only the
+    // screen to count down on.
+    Q_INVOKABLE void captureLater(int seconds, const QRectF &region, bool recordMode, bool keepRegion = true);
     // Records a region in screen coordinates, once the overlay is gone.
     Q_INVOKABLE void startRecording(const QRectF &region);
     Q_INVOKABLE void stopRecording();
@@ -122,6 +124,7 @@ private:
     QPointer<QQuickWindow> m_recordingControls;
     QPointer<QQuickWindow> m_countdown;
     bool m_countdownRecordMode = false;
+    bool m_countdownKeepsRegion = true;
     QPointer<QQuickWindow> m_overlay;
     // The editor a capture is for, and its document.
     QPointer<QQuickWindow> m_addEditor;
