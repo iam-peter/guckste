@@ -997,19 +997,19 @@ Window {
             onClicked: root.save()
         }
         IconButton {
-            visible: root.addTarget !== null
+            property bool available: root.addTarget !== null
             iconName: "image-plus"
             tip: qsTr("Add to the editor (Enter)")
             onClicked: root.addToEditor()
         }
         IconButton {
-            visible: root.addTarget === null
+            property bool available: root.addTarget === null
             iconName: "pencil-ruler"
             tip: qsTr("Open in the editor to zoom and measure (E)")
             onClicked: root.edit()
         }
         IconButton {
-            visible: root.addTarget === null
+            property bool available: root.addTarget === null
             iconName: "video"
             tip: root.recordMode ? qsTr("Record this region (Enter)") : qsTr("Record this region (Shift+Enter)")
             checked: root.recordMode
@@ -1019,7 +1019,7 @@ Window {
         // here for each recording, and remembered for the next.
         IconButton {
             objectName: "clickStills"
-            visible: root.addTarget === null && Preferences.showKeysSupported
+            property bool available: root.addTarget === null && Preferences.showKeysSupported
             iconName: "mouse-pointer-2"
             checkable: true
             checked: Preferences.stillsOnClicks
@@ -1029,7 +1029,7 @@ Window {
         }
         IconButton {
             objectName: "changeStills"
-            visible: root.addTarget === null
+            property bool available: root.addTarget === null
             iconName: "square-dashed"
             checkable: true
             checked: Preferences.stillsOnChanges
@@ -1038,6 +1038,7 @@ Window {
             onToggled: Preferences.stillsOnChanges = checked
         }
         IconButton {
+            objectName: "cancelButton"
             iconName: "x"
             tip: qsTr("Cancel (Esc)")
             onClicked: root.cancel()

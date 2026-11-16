@@ -760,6 +760,15 @@ private slots:
         QCOMPARE(document->annotationCount(), 1);
         QCOMPARE(document->annotations().first().rect(), QRectF(150, 150, 250, 150));
 
+        // The toolbar ends at its last button: buttons left out, like the
+        // one adding to an editor, take no room.
+        auto *toolbar = window->findChild<QQuickItem *>(u"toolbar"_s);
+        auto *cancelButton = window->findChild<QQuickItem *>(u"cancelButton"_s);
+        QVERIFY(toolbar && cancelButton);
+        const qreal end = cancelButton->mapToItem(toolbar, QPointF(cancelButton->width(), 0)).x();
+        QVERIFY2(toolbar->width() - end <= toolbar->property("rightPadding").toReal() + 1,
+                 qPrintable(u"bar %1 wide, last button ends at %2"_s.arg(toolbar->width()).arg(end)));
+
         // Back to selecting: dragging inside moves the region.
         window->setProperty("tool", int(Document::Select));
         QTest::mousePress(window, Qt::LeftButton, Qt::NoModifier, QPoint(600, 450));
